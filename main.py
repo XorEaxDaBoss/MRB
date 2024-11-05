@@ -5,6 +5,14 @@ import requests
 import asyncio
 from fake_useragent import UserAgent
 from faker import Faker
+import os
+from keep_alive import keep_alive
+
+keep_alive()
+
+# Set up the bot using the environment variable for the token
+bot = Bot(token=os.environ.get('TOKEN'))
+dp = Dispatcher(bot)
 
 # Set up logging for debugging
 logging.basicConfig(

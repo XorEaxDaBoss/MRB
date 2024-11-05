@@ -1,0 +1,6 @@
+Flask
+requests
+asyncio
+fake-useragent
+Faker
+python-telegram-bot==20.0

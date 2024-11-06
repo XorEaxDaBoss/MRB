@@ -28,7 +28,6 @@ fake = Faker()
 
 # Banner for console output
 banner = "Ohayo"
-
 print("\033[31m", banner, "\033[0m")
 
 # Database connection functions
@@ -44,6 +43,34 @@ def connect_db():
 def close_db(connection):
     """Close the MySQL database connection"""
     connection.close()
+
+# /reg command for user registration
+async def register_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    username = update.effective_user.username or "NoUsername"
+    full_name = update.effective_user.full_name
+
+    # Connect to the database
+    conn = connect_db()
+    cursor = conn.cursor()
+
+    # Check if the user is already registered
+    cursor.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
+    result = cursor.fetchone()
+
+    if result:
+        await update.message.reply_text("You're already registered!")
+    else:
+        # Insert the new user into the database
+        cursor.execute(
+            "INSERT INTO users (user_id, username, name, account_type, credits) VALUES (%s, %s, %s, %s, %s)",
+            (user_id, username, full_name, "FREE", 0)
+        )
+        conn.commit()
+        await update.message.reply_text("Registration successful! Welcome to the bot.")
+    
+    # Close the database connection
+    close_db(conn)
 
 # Function to send a report request
 def send_report(target_user: str, proxy=None):
@@ -128,7 +155,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = update.message.text
     if text == "Report":
-        # Show "Choose an action." with buttons "Single Report", "Mass Report"
         keyboard = [
             [
                 InlineKeyboardButton("Single Report", callback_data='single_report'),
@@ -136,12 +162,8 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            "Choose an action:",
-            reply_markup=reply_markup
-        )
+        await update.message.reply_text("Choose an action:", reply_markup=reply_markup)
     elif text == "Tools":
-        # Show "Choose a tool." with buttons "Bin Lookup", "Anti-Public"
         keyboard = [
             [
                 InlineKeyboardButton("Bin Lookup", callback_data='bin_lookup'),
@@ -149,20 +171,13 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            "Choose a tool:",
-            reply_markup=reply_markup
-        )
+        await update.message.reply_text("Choose a tool:", reply_markup=reply_markup)
     elif text == "Save Username":
         context.user_data['awaiting_username'] = True
-        await update.message.reply_text(
-            "Please enter the username to save:"
-        )
+        await update.message.reply_text("Please enter the username to save:")
     elif text == "Proxies":
         context.user_data['awaiting_proxies'] = True
-        await update.message.reply_text(
-            "Send your proxies in any format in one message or a file (.txt)."
-        )
+        await update.message.reply_text("Send your proxies in any format in one message or a file (.txt).")
     elif text == "User Info":
         await user_info(update, context)
     elif text == "Redeem Key":
@@ -170,96 +185,26 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     else:
         await handle_text(update, context)
 
-# Handle inline button callbacks
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-
-    if data == 'single_report':
-        target_user = context.user_data.get('saved_username')
-        if target_user:
-            response_message = send_report(target_user)
-            await query.edit_message_text(f"✅ {response_message}")
-            await send_main_menu(update, context)
-        else:
-            await query.edit_message_text("No username saved. Please use 'Save Username' to set a username first.")
-            await send_main_menu(update, context)
-    elif data == 'mass_report':
-        target_user = context.user_data.get('saved_username')
-        if target_user:
-            keyboard = [
-                [
-                    InlineKeyboardButton("10", callback_data='mass_10'),
-                    InlineKeyboardButton("20", callback_data='mass_20'),
-                    InlineKeyboardButton("50", callback_data='mass_50'),
-                    InlineKeyboardButton("100", callback_data='mass_100')
-                ],
-                [InlineKeyboardButton("Custom", callback_data='mass_custom')]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(
-                "Choose the number of reports:",
-                reply_markup=reply_markup
-            )
-        else:
-            await query.edit_message_text("No username saved. Please use 'Save Username' to set a username first.")
-            await send_main_menu(update, context)
-    elif data.startswith('mass_'):
-        if data == 'mass_custom':
-            context.user_data['awaiting_custom_count'] = True
-            await query.edit_message_text("Enter the number of reports:")
-        else:
-            count = int(data.split('_')[1])
-            await start_mass_report(update, context, count)
-            await send_main_menu(update, context)
-    elif data == 'bin_lookup':
-        context.user_data['awaiting_bin_input'] = True
-        await query.edit_message_text("Please enter the BIN number(s), separated by commas:")
-    elif data == 'anti_public':
-        context.user_data['awaiting_anti_public_input'] = True
-        await query.edit_message_text("Please enter the card number(s), separated by commas:")
+# Function to retrieve user information
+async def user_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT name, username, account_type, credits FROM users WHERE user_id = %s", (update.effective_user.id,))
+    user_data = cursor.fetchone()
+    close_db(conn)
+    if user_data:
+        name, username, account_type, credits = user_data
+        await update.message.reply_text(
+            f"ℹ️ *User Info*\n\n"
+            f"ID: {update.effective_user.id}\n"
+            f"Name: {name}\n"
+            f"Username: @{username}\n"
+            f"Type: {account_type}\n"
+            f"Credits: {credits}",
+            parse_mode='Markdown'
+        )
     else:
-        await query.edit_message_text("Unknown action.")
-# Bin Lookup API call
-async def bin_lookup(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get('awaiting_bin_input'):
-        bin_numbers = update.message.text.strip().split(',')
-        try:
-            response = requests.post(
-                "https://bins.antipublic.cc/bins",
-                json=bin_numbers
-            ).json()
-            result_text = ""
-            for bin_info in response:
-                for key, value in bin_info.items():
-                    result_text += f"{key}: {value}\n"
-                result_text += "\n"
-            await update.message.reply_text(result_text)
-        except Exception as e:
-            await update.message.reply_text(f"An error occurred: {e}")
-        context.user_data['awaiting_bin_input'] = False
-        await send_main_menu(update, context)
-
-# Anti-Public API call
-async def anti_public_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get('awaiting_anti_public_input'):
-        card_numbers = update.message.text.strip().split(',')
-        try:
-            response = requests.post(
-                "https://api.antipublic.cc/cards",
-                json=card_numbers
-            ).json()
-            result_text = (
-                f"Public CCs: {response['public']}\n"
-                f"Private CCs: {response['private']}\n"
-                f"{response['private_percentage']}% private"
-            )
-            await update.message.reply_text(result_text)
-        except Exception as e:
-            await update.message.reply_text(f"An error occurred: {e}")
-        context.user_data['awaiting_anti_public_input'] = False
-        await send_main_menu(update, context)
+        await update.message.reply_text("User not registered.")
 
 # Generate Key (restricted to OWNER_ID)
 async def generate_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -268,7 +213,7 @@ async def generate_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Unauthorized access.")
         return
 
-    credits = 100  # Example credit amount
+    credits = 100
     key_id = 'MRB-' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
     conn = connect_db()
     cursor = conn.cursor()
@@ -300,67 +245,111 @@ async def redeem_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
     close_db(conn)
     await update.message.reply_text(response)
 
-# Display User Info
-async def user_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    conn = connect_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT name, username, account_type, credits FROM users WHERE user_id = %s", (update.effective_user.id,))
-    user_data = cursor.fetchone()
-    close_db(conn)
-    if user_data:
-        name, username, account_type, credits = user_data
-        await update.message.reply_text(
-            f"ℹ️ *User Info*\n\n"
-            f"ID: {update.effective_user.id}\n"
-            f"Name: {name}\n"
-            f"Username: @{username}\n"
-            f"Type: {account_type}\n"
-            f"Credits: {credits}",
-            parse_mode='Markdown'
-        )
+# Handle inline button callbacks
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == 'single_report':
+        target_user = context.user_data.get('saved_username')
+        if target_user:
+            response_message = send_report(target_user)
+            await query.edit_message_text(f"✅ {response_message}")
+            await send_main_menu(update, context)
+        else:
+            await query.edit_message_text("No username saved. Please use 'Save Username' to set a username first.")
+            await send_main_menu(update, context)
+    elif data == 'mass_report':
+        target_user = context.user_data.get('saved_username')
+        if target_user:
+            keyboard = [
+                [
+                    InlineKeyboardButton("10", callback_data='mass_10'),
+                    InlineKeyboardButton("20", callback_data='mass_20'),
+                    InlineKeyboardButton("50", callback_data='mass_50'),
+                    InlineKeyboardButton("100", callback_data='mass_100')
+                ],
+                [InlineKeyboardButton("Custom", callback_data='mass_custom')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text("Choose the number of reports:", reply_markup=reply_markup)
+        else:
+            await query.edit_message_text("No username saved. Please use 'Save Username' to set a username first.")
+            await send_main_menu(update, context)
+    elif data.startswith('mass_'):
+        if data == 'mass_custom':
+            context.user_data['awaiting_custom_count'] = True
+            await query.edit_message_text("Enter the number of reports:")
+        else:
+            count = int(data.split('_')[1])
+            await start_mass_report(update, context, count)
+            await send_main_menu(update, context)
+    elif data == 'bin_lookup':
+        context.user_data['awaiting_bin_input'] = True
+        await query.edit_message_text("Please enter the BIN number(s), separated by commas:")
+    elif data == 'anti_public':
+        context.user_data['awaiting_anti_public_input'] = True
+        await query.edit_message_text("Please enter the card number(s), separated by commas:")
     else:
-        await update.message.reply_text("User not registered.")
+        await query.edit_message_text("Unknown action.")
 
 # Handle text messages based on context
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = update.message.text.strip()
     if context.user_data.get('awaiting_username'):
-        # Save the username
         target_user = text
-        # Remove '@' prefix if present
         target_user_clean = target_user.lstrip('@').lower()
-        # Define the blacklist
         blacklist = ['gdbs2']
         if target_user_clean in (user.lower() for user in blacklist):
-            await update.message.reply_text(
-                "❌ You can't report that username! That username is either the owner of the bot or blacklisted."
-            )
+            await update.message.reply_text("❌ You can't report that username! That username is either the owner of the bot or blacklisted.")
         else:
             context.user_data['saved_username'] = target_user
             await update.message.reply_text(f"✅ Username saved: {target_user}")
         context.user_data['awaiting_username'] = False
         await send_main_menu(update, context)
     elif context.user_data.get('awaiting_proxies'):
-        # Save the proxies
         proxies = text.splitlines()
-        context.user_data['proxies'] = [proxy.strip()
-                                        for proxy in proxies if proxy.strip()]
+        context.user_data['proxies'] = [proxy.strip() for proxy in proxies if proxy.strip()]
         await update.message.reply_text(f"✅ Proxies saved: {len(context.user_data['proxies'])} proxies added.")
         context.user_data['awaiting_proxies'] = False
         await send_main_menu(update, context)
-    elif context.user_data.get('awaiting_custom_count'):
-        try:
-            count = int(text)
-            await start_mass_report(update, context, count)
-            await send_main_menu(update, context)
-        except ValueError:
-            await update.message.reply_text("Please provide a valid number or type /start to go back.")
     elif context.user_data.get('awaiting_bin_input'):
         await bin_lookup(update, context)
     elif context.user_data.get('awaiting_anti_public_input'):
         await anti_public_check(update, context)
     else:
         await update.message.reply_text("Sorry, I didn't understand that. Please choose an option from the keyboard.")
+
+# Bin Lookup API call
+async def bin_lookup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    bin_numbers = update.message.text.strip().split(',')
+    try:
+        response = requests.post("https://bins.antipublic.cc/bins", json=bin_numbers).json()
+        result_text = ""
+        for bin_info in response:
+            for key, value in bin_info.items():
+                result_text += f"{key}: {value}\n"
+            result_text += "\n"
+        await update.message.reply_text(result_text)
+    except Exception as e:
+        await update.message.reply_text(f"An error occurred: {e}")
+    context.user_data['awaiting_bin_input'] = False
+    await send_main_menu(update, context)
+
+# Anti-Public API call
+async def anti_public_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    card_numbers = update.message.text.strip().split(',')
+    try:
+        response = requests.post("https://api.antipublic.cc/cards", json=card_numbers).json()
+        result_text = (f"Public CCs: {response['public']}\n"
+                       f"Private CCs: {response['private']}\n"
+                       f"{response['private_percentage']}% private")
+        await update.message.reply_text(result_text)
+    except Exception as e:
+        await update.message.reply_text(f"An error occurred: {e}")
+    context.user_data['awaiting_anti_public_input'] = False
+    await send_main_menu(update, context)
 
 # Handle document uploads (proxies)
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -371,8 +360,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             file_content = await file.download_as_bytearray()
             proxies_text = file_content.decode('utf-8')
             proxies = proxies_text.splitlines()
-            context.user_data['proxies'] = [proxy.strip()
-                                            for proxy in proxies if proxy.strip()]
+            context.user_data['proxies'] = [proxy.strip() for proxy in proxies if proxy.strip()]
             await update.message.reply_text(f"✅ Proxies saved: {len(context.user_data['proxies'])} proxies added.")
             context.user_data['awaiting_proxies'] = False
             await send_main_menu(update, context)
@@ -380,16 +368,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await update.message.reply_text("Please upload a valid .txt file containing proxies.")
     else:
         await update.message.reply_text("I wasn't expecting a document. Please choose an option from the keyboard.")
-
-# Handle single report using saved username
-async def single_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    target_user = context.user_data.get('saved_username')
-    if target_user:
-        response_message = send_report(target_user)
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"✅ {response_message}")
-        await send_main_menu(update, context)
-    else:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="No username saved. Please use 'Save Username' to set a username first.")
 
 # Start mass report with specified count
 async def start_mass_report(update: Update, context: ContextTypes.DEFAULT_TYPE, count: int) -> None:
@@ -403,7 +381,6 @@ async def start_mass_report(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
     # Loop through the specified number of reports
     for i in range(count):
-        # Determine proxy to use
         if 'proxies' in context.user_data and context.user_data['proxies']:
             proxies = context.user_data['proxies']
             proxy = proxies[i % len(proxies)]  # Rotate proxies
@@ -413,19 +390,18 @@ async def start_mass_report(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         response_message = send_report(target_user, proxy=proxy)
 
         # Update the progress in the same message bubble
-        progress_bar = '█' * ((i+1)*10//count) + \
-            '░' * (10 - ((i+1)*10//count))
+        progress_bar = '█' * ((i+1)*10//count) + '░' * (10 - ((i+1)*10//count))
         await progress_message.edit_text(f"Report {i+1}/{count}: {response_message}\nProgress: [{progress_bar}]")
         await asyncio.sleep(0.2)  # Add delay to avoid rate limiting
 
-    # Finalize the message once all reports are completed
-    await progress_message.edit_text("✅ All reports were done successfully! Thank you for using Ohayo Auto Report Bot! 🧑‍💻")
+    await progress_message.edit_text("✅ All reports were done successfully! Thank you for using Ohayo Auto Report Bot!")
     await send_main_menu(update, context)
 
-# Command handlers
+# Command handlers and bot start
 def main():
     # Initialize Application
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("reg", register_user))  # Register user command
     application.add_handler(CommandHandler("generate_key", generate_key))
     application.add_handler(CommandHandler("redeem", redeem_key))
     application.add_handler(CommandHandler("user_info", user_info))

@@ -44,6 +44,43 @@ def close_db(connection):
     """Close the MySQL database connection"""
     connection.close()
 
+# Helper functions
+def is_user_registered(user_id):
+    if str(user_id) == OWNER_ID:
+        return True
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM users WHERE user_id = %s", (user_id,))
+    result = cursor.fetchone()
+    close_db(conn)
+    return bool(result)
+
+def get_user_credits(user_id):
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT credits FROM users WHERE user_id = %s", (user_id,))
+    result = cursor.fetchone()
+    close_db(conn)
+    if result:
+        return result[0]
+    else:
+        return None
+
+async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    reply_markup = get_main_menu_keyboard(update.effective_user.id)
+    if update.callback_query:
+        await update.callback_query.message.reply_text(
+            "👋 Welcome back! Choose an option:",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    else:
+        await update.message.reply_text(
+            "👋 Welcome back! Choose an option:",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
 # /reg command for user registration
 async def register_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -136,15 +173,18 @@ def send_report(target_user: str, proxy=None):
         return "Error: " + str(e)
 
 # Start command with custom keyboard
-def get_main_menu_keyboard():
+def get_main_menu_keyboard(user_id):
     keyboard = [
         [KeyboardButton("Report"), KeyboardButton("Save Username"), KeyboardButton("Proxies")],
         [KeyboardButton("Tools"), KeyboardButton("User Info"), KeyboardButton("Redeem Key")]
     ]
+    if str(user_id) == OWNER_ID:
+        keyboard.append([KeyboardButton("Keygen")])
+    keyboard.append([KeyboardButton("Help")])
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    reply_markup = get_main_menu_keyboard()
+    reply_markup = get_main_menu_keyboard(update.effective_user.id)
     await update.message.reply_text(
         "👋 Welcome to *Ohayo Auto Report Bot*! Choose an option:",
         reply_markup=reply_markup,
@@ -153,6 +193,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # Handle button presses
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_user_registered(update.effective_user.id):
+        await update.message.reply_text("Please register first using /reg command.")
+        return
+
     text = update.message.text
     if text == "Report":
         keyboard = [
@@ -182,21 +226,40 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await user_info(update, context)
     elif text == "Redeem Key":
         await update.message.reply_text("Please enter your key using the command /redeem <key>")
+    elif text == "Keygen":
+        if str(update.effective_user.id) == OWNER_ID:
+            keyboard = [
+                [
+                    InlineKeyboardButton("100 Credits", callback_data='keygen_100'),
+                    InlineKeyboardButton("200 Credits", callback_data='keygen_200'),
+                    InlineKeyboardButton("500 Credits", callback_data='keygen_500'),
+                    InlineKeyboardButton("1000 Credits", callback_data='keygen_1000')
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text("Choose the amount of credits for the key:", reply_markup=reply_markup)
+        else:
+            await update.message.reply_text("Unauthorized access.")
+    elif text == "Help":
+        await help_command(update, context)
     else:
         await handle_text(update, context)
 
 # Function to retrieve user information
 async def user_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     conn = connect_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT name, username, account_type, credits FROM users WHERE user_id = %s", (update.effective_user.id,))
+    cursor.execute("SELECT name, username, account_type, credits FROM users WHERE user_id = %s", (user_id,))
     user_data = cursor.fetchone()
     close_db(conn)
     if user_data:
         name, username, account_type, credits = user_data
+        if str(user_id) == OWNER_ID:
+            account_type = 'OWNER'
         await update.message.reply_text(
             f"ℹ️ *User Info*\n\n"
-            f"ID: {update.effective_user.id}\n"
+            f"ID: {user_id}\n"
             f"Name: {name}\n"
             f"Username: @{username}\n"
             f"Type: {account_type}\n"
@@ -204,7 +267,22 @@ async def user_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
     else:
-        await update.message.reply_text("User not registered.")
+        if str(user_id) == OWNER_ID:
+            account_type = 'OWNER'
+            name = update.effective_user.full_name
+            username = update.effective_user.username or "NoUsername"
+            credits = 'Unlimited'
+            await update.message.reply_text(
+                f"ℹ️ *User Info*\n\n"
+                f"ID: {user_id}\n"
+                f"Name: {name}\n"
+                f"Username: @{username}\n"
+                f"Type: {account_type}\n"
+                f"Credits: {credits}",
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text("User not registered.")
 
 # Generate Key (restricted to OWNER_ID)
 async def generate_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -213,14 +291,19 @@ async def generate_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Unauthorized access.")
         return
 
-    credits = 100
+    try:
+        credits = int(context.args[0])  # /keygen [amount]
+    except (IndexError, ValueError):
+        await update.message.reply_text("Please provide a valid credit amount. Usage: /keygen [amount]")
+        return
+
     key_id = 'MRB-' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
     conn = connect_db()
     cursor = conn.cursor()
     cursor.execute("INSERT INTO user_keys (key_id, credits) VALUES (%s, %s)", (key_id, credits))
     conn.commit()
     close_db(conn)
-    await update.message.reply_text(f"Generated key: {key_id} with {credits} credits")
+    await update.message.reply_text(f"Generated key: `{key_id}` with {credits} credits", parse_mode='Markdown')
 
 # Redeem Key
 async def redeem_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -251,9 +334,24 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
+    user_id = update.effective_user.id
+
     if data == 'single_report':
         target_user = context.user_data.get('saved_username')
         if target_user:
+            # Check credits
+            if str(user_id) != OWNER_ID:
+                credits = get_user_credits(user_id)
+                if credits is None or credits < 1:
+                    await query.edit_message_text("Insufficient credits. Please redeem a key to get more credits.")
+                    await send_main_menu(update, context)
+                    return
+                # Deduct 1 credit
+                conn = connect_db()
+                cursor = conn.cursor()
+                cursor.execute("UPDATE users SET credits = credits - 1 WHERE user_id = %s", (user_id,))
+                conn.commit()
+                close_db(conn)
             response_message = send_report(target_user)
             await query.edit_message_text(f"✅ {response_message}")
             await send_main_menu(update, context)
@@ -269,8 +367,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     InlineKeyboardButton("20", callback_data='mass_20'),
                     InlineKeyboardButton("50", callback_data='mass_50'),
                     InlineKeyboardButton("100", callback_data='mass_100')
-                ],
-                [InlineKeyboardButton("Custom", callback_data='mass_custom')]
+                ]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text("Choose the number of reports:", reply_markup=reply_markup)
@@ -278,25 +375,43 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("No username saved. Please use 'Save Username' to set a username first.")
             await send_main_menu(update, context)
     elif data.startswith('mass_'):
-        if data == 'mass_custom':
-            context.user_data['awaiting_custom_count'] = True
-            await query.edit_message_text("Enter the number of reports:")
-        else:
-            count = int(data.split('_')[1])
-            await start_mass_report(update, context, count)
-            await send_main_menu(update, context)
+        count = int(data.split('_')[1])
+        await start_mass_report(update, context, count)
+        await send_main_menu(update, context)
     elif data == 'bin_lookup':
         context.user_data['awaiting_bin_input'] = True
         await query.edit_message_text("Please enter the BIN number(s), separated by commas:")
     elif data == 'anti_public':
         context.user_data['awaiting_anti_public_input'] = True
         await query.edit_message_text("Please enter the card number(s), separated by commas:")
+    elif data.startswith('keygen_'):
+        if str(user_id) == OWNER_ID:
+            credits = int(data.split('_')[1])
+            await generate_key_with_credits(update, context, credits)
+            await send_main_menu(update, context)
+        else:
+            await query.edit_message_text("Unauthorized access.")
     else:
         await query.edit_message_text("Unknown action.")
+
+async def generate_key_with_credits(update: Update, context: ContextTypes.DEFAULT_TYPE, credits: int):
+    key_id = 'MRB-' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO user_keys (key_id, credits) VALUES (%s, %s)", (key_id, credits))
+    conn.commit()
+    close_db(conn)
+    await update.callback_query.edit_message_text(f"Generated key: `{key_id}` with {credits} credits", parse_mode='Markdown')
 
 # Handle text messages based on context
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = update.message.text.strip()
+    user_id = update.effective_user.id
+
+    if not is_user_registered(user_id):
+        await update.message.reply_text("Please register first using /reg command.")
+        return
+
     if context.user_data.get('awaiting_username'):
         target_user = text
         target_user_clean = target_user.lstrip('@').lower()
@@ -372,9 +487,35 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 # Start mass report with specified count
 async def start_mass_report(update: Update, context: ContextTypes.DEFAULT_TYPE, count: int) -> None:
     target_user = context.user_data.get('saved_username')
+    user_id = update.effective_user.id
     if not target_user:
         await context.bot.send_message(chat_id=update.effective_chat.id, text="No username saved. Please use 'Save Username' to set a username first.")
         return
+
+    # Credits required for mass reports
+    credits_required = {
+        10: 9,
+        20: 17,
+        50: 40,
+        100: 75
+    }
+    credits_needed = credits_required.get(count)
+    if credits_needed is None:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Invalid number of reports.")
+        return
+
+    # Check credits
+    if str(user_id) != OWNER_ID:
+        credits = get_user_credits(user_id)
+        if credits is None or credits < credits_needed:
+            await context.bot.send_message(chat_id=update.effective_chat.id, text="Insufficient credits. Please redeem a key to get more credits.")
+            return
+        # Deduct credits
+        conn = connect_db()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET credits = credits - %s WHERE user_id = %s", (credits_needed, user_id))
+        conn.commit()
+        close_db(conn)
 
     # Send an initial message to be updated with progress
     progress_message = await context.bot.send_message(chat_id=update.effective_chat.id, text=f"🚀 Starting mass report for {target_user}...")
@@ -397,14 +538,27 @@ async def start_mass_report(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     await progress_message.edit_text("✅ All reports were done successfully! Thank you for using Ohayo Auto Report Bot!")
     await send_main_menu(update, context)
 
+# Help command
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = (
+        "/start - Start the bot\n"
+        "/reg - Register as a new user\n"
+        "/redeem <key> - Redeem a key to get credits\n"
+        "/user_info - Get your user information\n"
+    )
+    if str(update.effective_user.id) == OWNER_ID:
+        help_text += "/keygen <amount> - Generate a key with specified credits\n"
+    await update.message.reply_text(help_text)
+
 # Command handlers and bot start
 def main():
     # Initialize Application
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("reg", register_user))  # Register user command
-    application.add_handler(CommandHandler("generate_key", generate_key))
+    application.add_handler(CommandHandler("keygen", generate_key))
     application.add_handler(CommandHandler("redeem", redeem_key))
     application.add_handler(CommandHandler("user_info", user_info))
+    application.add_handler(CommandHandler("help", help_command))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_buttons))
     application.add_handler(MessageHandler(filters.Document.FileExtension("txt"), handle_document))
     application.add_handler(CallbackQueryHandler(button_callback))

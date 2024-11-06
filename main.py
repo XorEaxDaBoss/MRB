@@ -699,7 +699,6 @@ def main():
     application.add_handler(CallbackQueryHandler(button_callback))
 
     # Start the bot
-    application.run_polling()
     print("Bot is running... Press Ctrl+C to stop.")
 
 # Help command
@@ -716,3 +715,19 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == '__main__':
     main() 
+
+# Define a function to set the webhook URL
+async def start_webhook():
+    # Sets the webhook to the public URL
+    await application.bot.set_webhook(url=WEBHOOK_URL)
+
+# Main code to start the bot in webhook mode
+if __name__ == '__main__':
+    # Set the webhook URL and start the webhook server
+    asyncio.run(start_webhook())  # Set up the webhook
+    application.run_webhook(
+        listen="0.0.0.0",  # Listen on all network interfaces
+        port=8443,         # Port to listen on; some services may require port 443
+        url_path=TOKEN,    # Use token as the URL path for security
+        webhook_url=WEBHOOK_URL
+    )

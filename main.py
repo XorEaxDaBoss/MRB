@@ -5,6 +5,9 @@ import requests
 import asyncio
 from fake_useragent import UserAgent
 from faker import Faker
+import mysql.connector
+import random
+import string
 import os
 from keep_alive import keep_alive
 
@@ -12,6 +15,7 @@ keep_alive()
 
 # Initialize the bot application
 TOKEN = os.environ.get('TOKEN')  # Ensure to set your TOKEN in the environment variables
+OWNER_ID = os.environ.get('OWNER_ID')  # Set OWNER_ID in environment variables
 application = Application.builder().token(TOKEN).build()
 
 # Set up logging for debugging
@@ -28,6 +32,20 @@ Ohayo™
 """
 
 print("\033[31m", banner, "\033[0m")
+
+# Database connection functions
+def connect_db():
+    """Connect to the MySQL database"""
+    return mysql.connector.connect(
+        host=os.environ['DB_HOST'],
+        user=os.environ['DB_USER'],
+        password=os.environ['DB_PASSWORD'],
+        database=os.environ['DB_NAME']
+    )
+
+def close_db(connection):
+    """Close the MySQL database connection"""
+    connection.close()
 
 # Function to send a report request
 def send_report(target_user: str, proxy=None):
@@ -96,9 +114,8 @@ Thank you for your attention to this matter.
 # Start command with custom keyboard
 def get_main_menu_keyboard():
     keyboard = [
-        [KeyboardButton("Report"), KeyboardButton(
-            "Save Username"), KeyboardButton("Proxies")],
-        [KeyboardButton("Tools")]
+        [KeyboardButton("Report"), KeyboardButton("Save Username"), KeyboardButton("Proxies")],
+        [KeyboardButton("Tools"), KeyboardButton("User Info"), KeyboardButton("Redeem Key")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -153,6 +170,10 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(
             "Send your proxies in any format in one message or a file (.txt)."
         )
+    elif text == "User Info":
+        await user_info(update, context)
+    elif text == "Redeem Key":
+        await update.message.reply_text("Please enter your key using the command /redeem <key>")
     else:
         await handle_text(update, context)
 
@@ -200,24 +221,113 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await start_mass_report(update, context, count)
             await send_main_menu(update, context)
     elif data == 'bin_lookup':
-        # Set up to receive BIN input from the user
         context.user_data['awaiting_bin_input'] = True
         await query.edit_message_text("Please enter the BIN number(s), separated by commas:")
     elif data == 'anti_public':
-        # Set up to receive card numbers from the user
         context.user_data['awaiting_anti_public_input'] = True
         await query.edit_message_text("Please enter the card number(s), separated by commas:")
     else:
         await query.edit_message_text("Unknown action.")
 
-# Send main menu
-async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    reply_markup = get_main_menu_keyboard()
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text="Main Menu:",
-        reply_markup=reply_markup
-    )
+# Bin Lookup API call
+async def bin_lookup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get('awaiting_bin_input'):
+        bin_numbers = update.message.text.strip().split(',')
+        try:
+            response = requests.post(
+                "https://bins.antipublic.cc/bins",
+                json=bin_numbers
+            ).json()
+            result_text = ""
+            for bin_info in response:
+                for key, value in bin_info.items():
+                    result_text += f"{key}: {value}\n"
+                result_text += "\n"
+            await update.message.reply_text(result_text)
+        except Exception as e:
+            await update.message.reply_text(f"An error occurred: {e}")
+        context.user_data['awaiting_bin_input'] = False
+        await send_main_menu(update, context)
+
+# Anti-Public API call
+async def anti_public_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get('awaiting_anti_public_input'):
+        card_numbers = update.message.text.strip().split(',')
+        try:
+            response = requests.post(
+                "https://api.antipublic.cc/cards",
+                json=card_numbers
+            ).json()
+            result_text = (
+                f"Public CCs: {response['public']}\n"
+                f"Private CCs: {response['private']}\n"
+                f"{response['private_percentage']}% private"
+            )
+            await update.message.reply_text(result_text)
+        except Exception as e:
+            await update.message.reply_text(f"An error occurred: {e}")
+        context.user_data['awaiting_anti_public_input'] = False
+        await send_main_menu(update, context)
+
+# Generate Key (restricted to OWNER_ID)
+async def generate_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if str(user_id) != OWNER_ID:
+        await update.message.reply_text("Unauthorized access.")
+        return
+
+    credits = 100  # Example credit amount
+    key_id = 'MRB-' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO user_keys (key_id, credits) VALUES (%s, %s)", (key_id, credits))
+    conn.commit()
+    close_db(conn)
+    await update.message.reply_text(f"Generated key: {key_id} with {credits} credits")
+
+# Redeem Key
+async def redeem_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        key_id = context.args[0]  # Assumes /redeem <key_id>
+    except IndexError:
+        await update.message.reply_text("Please enter a valid key. Usage: /redeem <key>")
+        return
+
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT credits, is_redeemed FROM user_keys WHERE key_id = %s", (key_id,))
+    result = cursor.fetchone()
+    if result and not result[1]:  # Check if key exists and is not redeemed
+        credits = result[0]
+        cursor.execute("UPDATE user_keys SET is_redeemed = TRUE, redeemed_by = %s, redeemed_at = NOW() WHERE key_id = %s", (update.effective_user.id, key_id))
+        cursor.execute("UPDATE users SET credits = credits + %s WHERE user_id = %s", (credits, update.effective_user.id))
+        conn.commit()
+        response = f"Key redeemed successfully! {credits} credits added."
+    else:
+        response = "Invalid or already redeemed key."
+    close_db(conn)
+    await update.message.reply_text(response)
+
+# Display User Info
+async def user_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT name, username, account_type, credits FROM users WHERE user_id = %s", (update.effective_user.id,))
+    user_data = cursor.fetchone()
+    close_db(conn)
+    if user_data:
+        name, username, account_type, credits = user_data
+        await update.message.reply_text(
+            f"ℹ️ *User Info*\n\n"
+            f"ID: {update.effective_user.id}\n"
+            f"Name: {name}\n"
+            f"Username: @{username}\n"
+            f"Type: {account_type}\n"
+            f"Credits: {credits}",
+            parse_mode='Markdown'
+        )
+    else:
+        await update.message.reply_text("User not registered.")
 
 # Handle text messages based on context
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -254,41 +364,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         except ValueError:
             await update.message.reply_text("Please provide a valid number or type /start to go back.")
     elif context.user_data.get('awaiting_bin_input'):
-        # Implementation for processing BIN input
-        bin_numbers = [bin.strip() for bin in text.split(',')]
-        try:
-            response = requests.post(
-                "https://bins.antipublic.cc/bins",
-                json=bin_numbers
-            ).json()
-            result_text = ""
-            for bin_info in response:
-                for key, value in bin_info.items():
-                    result_text += f"{key}: {value}\n"
-                result_text += "\n"
-            await update.message.reply_text(result_text)
-        except Exception as e:
-            await update.message.reply_text(f"An error occurred: {e}")
-        context.user_data['awaiting_bin_input'] = False
-        await send_main_menu(update, context)
+        await bin_lookup(update, context)
     elif context.user_data.get('awaiting_anti_public_input'):
-        # Implementation for processing Anti-Public input
-        card_numbers = [card.strip() for card in text.split(',')]
-        try:
-            response = requests.post(
-                "https://api.antipublic.cc/cards",
-                json=card_numbers
-            ).json()
-            result_text = (
-                f"Public CCs: {response['public']}\n"
-                f"Private CCs: {response['private']}\n"
-                f"{response['private_percentage']}% private"
-            )
-            await update.message.reply_text(result_text)
-        except Exception as e:
-            await update.message.reply_text(f"An error occurred: {e}")
-        context.user_data['awaiting_anti_public_input'] = False
-        await send_main_menu(update, context)
+        await anti_public_check(update, context)
     else:
         await update.message.reply_text("Sorry, I didn't understand that. Please choose an option from the keyboard.")
 
@@ -352,19 +430,15 @@ async def start_mass_report(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     await progress_message.edit_text("✅ All reports were done successfully! Thank you for using Ohayo™ Auto Report Bot! 🧑‍💻")
     await send_main_menu(update, context)
 
+# Command handlers
 def main():
-    # Replace 'YOUR_BOT_TOKEN' with the token provided by BotFather
-    bot_token = '7508350930:AAHxPmO5kRbLbqzoXLTiR8LWbdSfpdYbNV0'
-
     # Initialize Application
-    application = Application.builder().token(bot_token).build()
-
-    # Command handlers
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(
-        filters.TEXT & (~filters.COMMAND), handle_buttons))
-    application.add_handler(MessageHandler(
-        filters.Document.FileExtension("txt"), handle_document))
+    application.add_handler(CommandHandler("generate_key", generate_key))
+    application.add_handler(CommandHandler("redeem", redeem_key))
+    application.add_handler(CommandHandler("user_info", user_info))
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_buttons))
+    application.add_handler(MessageHandler(filters.Document.FileExtension("txt"), handle_document))
     application.add_handler(CallbackQueryHandler(button_callback))
 
     # Start the bot

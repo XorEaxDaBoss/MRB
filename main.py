@@ -1,5 +1,5 @@
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup, Bot
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler, Dispatcher
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 import logging
 import requests
 import asyncio
@@ -10,9 +10,9 @@ from keep_alive import keep_alive
 
 keep_alive()
 
-# Set up the bot using the environment variable for the token
-bot = Bot(token=os.environ.get('TOKEN'))
-dp = Dispatcher(bot)
+# Initialize the bot application
+TOKEN = os.environ.get('TOKEN')  # Ensure to set your TOKEN in the environment variables
+application = Application.builder().token(TOKEN).build()
 
 # Set up logging for debugging
 logging.basicConfig(

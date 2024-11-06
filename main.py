@@ -175,12 +175,12 @@ def send_report(target_user: str, proxy=None):
 # Start command with custom keyboard
 def get_main_menu_keyboard(user_id):
     keyboard = [
-        [KeyboardButton("Report"), KeyboardButton("Save Username"), KeyboardButton("Proxies")],
-        [KeyboardButton("Tools"), KeyboardButton("User Info"), KeyboardButton("Redeem Key")]
+        [KeyboardButton("📢 Report"), KeyboardButton("💾 Save Username"), KeyboardButton("🔌 Proxies")],
+        [KeyboardButton("🛠️ Tools"), KeyboardButton("ℹ️ User Info"), KeyboardButton("🎟️ Redeem Key")]
     ]
     if str(user_id) == OWNER_ID:
-        keyboard.append([KeyboardButton("Keygen")])
-    keyboard.append([KeyboardButton("Help")])
+        keyboard.append([KeyboardButton("🔑 Keygen")])
+    keyboard.append([KeyboardButton("❓ Help")])
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -198,7 +198,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     text = update.message.text
-    if text == "Report":
+    if text == "📢 Report":
         keyboard = [
             [
                 InlineKeyboardButton("Single Report", callback_data='single_report'),
@@ -207,7 +207,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("Choose an action:", reply_markup=reply_markup)
-    elif text == "Tools":
+    elif text == "🛠️ Tools":
         keyboard = [
             [
                 InlineKeyboardButton("Bin Lookup", callback_data='bin_lookup'),
@@ -216,17 +216,17 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("Choose a tool:", reply_markup=reply_markup)
-    elif text == "Save Username":
+    elif text == "💾 Save Username":
         context.user_data['awaiting_username'] = True
         await update.message.reply_text("Please enter the username to save:")
-    elif text == "Proxies":
+    elif text == "🔌 Proxies":
         context.user_data['awaiting_proxies'] = True
         await update.message.reply_text("Send your proxies in any format in one message or a file (.txt).")
-    elif text == "User Info":
+    elif text == "ℹ️ User Info":
         await user_info(update, context)
-    elif text == "Redeem Key":
+    elif text == "🎟️ Redeem Key":
         await update.message.reply_text("Please enter your key using the command /redeem <key>")
-    elif text == "Keygen":
+    elif text == "🔑 Keygen":
         if str(update.effective_user.id) == OWNER_ID:
             keyboard = [
                 [
@@ -240,7 +240,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text("Choose the amount of credits for the key:", reply_markup=reply_markup)
         else:
             await update.message.reply_text("Unauthorized access.")
-    elif text == "Help":
+    elif text == "❓ Help":
         await help_command(update, context)
     else:
         await handle_text(update, context)
@@ -257,6 +257,7 @@ async def user_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         name, username, account_type, credits = user_data
         if str(user_id) == OWNER_ID:
             account_type = 'OWNER'
+            credits = 'Unlimited'
         await update.message.reply_text(
             f"ℹ️ *User Info*\n\n"
             f"ID: {user_id}\n"
@@ -320,9 +321,9 @@ async def redeem_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if result and not result[1]:  # Check if key exists and is not redeemed
         credits = result[0]
         cursor.execute("UPDATE user_keys SET is_redeemed = TRUE, redeemed_by = %s, redeemed_at = NOW() WHERE key_id = %s", (update.effective_user.id, key_id))
-        cursor.execute("UPDATE users SET credits = credits + %s WHERE user_id = %s", (credits, update.effective_user.id))
+        cursor.execute("UPDATE users SET credits = credits + %s, account_type = 'PREMIUM' WHERE user_id = %s", (credits, update.effective_user.id))
         conn.commit()
-        response = f"Key redeemed successfully! {credits} credits added."
+        response = f"Key redeemed successfully! {credits} credits added. Your account has been upgraded to PREMIUM."
     else:
         response = "Invalid or already redeemed key."
     close_db(conn)
@@ -337,7 +338,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     if data == 'single_report':
-        target_user = context.user_data.get('saved_username')
+        target_user = await get_saved_username(user_id)
         if target_user:
             # Check credits
             if str(user_id) != OWNER_ID:
@@ -351,6 +352,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 cursor = conn.cursor()
                 cursor.execute("UPDATE users SET credits = credits - 1 WHERE user_id = %s", (user_id,))
                 conn.commit()
+                # Check for downgrade
+                cursor.execute("SELECT credits FROM users WHERE user_id = %s", (user_id,))
+                credits = cursor.fetchone()[0]
+                if credits <= 0:
+                    cursor.execute("UPDATE users SET account_type = 'FREE' WHERE user_id = %s", (user_id,))
+                    conn.commit()
                 close_db(conn)
             response_message = send_report(target_user)
             await query.edit_message_text(f"✅ {response_message}")
@@ -359,14 +366,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("No username saved. Please use 'Save Username' to set a username first.")
             await send_main_menu(update, context)
     elif data == 'mass_report':
-        target_user = context.user_data.get('saved_username')
+        target_user = await get_saved_username(user_id)
         if target_user:
             keyboard = [
                 [
-                    InlineKeyboardButton("10", callback_data='mass_10'),
-                    InlineKeyboardButton("20", callback_data='mass_20'),
-                    InlineKeyboardButton("50", callback_data='mass_50'),
-                    InlineKeyboardButton("100", callback_data='mass_100')
+                    InlineKeyboardButton("10 Reports - 9 Credits", callback_data='mass_10'),
+                    InlineKeyboardButton("20 Reports - 17 Credits", callback_data='mass_20')
+                ],
+                [
+                    InlineKeyboardButton("50 Reports - 40 Credits", callback_data='mass_50'),
+                    InlineKeyboardButton("100 Reports - 75 Credits", callback_data='mass_100')
                 ]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -383,7 +392,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Please enter the BIN number(s), separated by commas:")
     elif data == 'anti_public':
         context.user_data['awaiting_anti_public_input'] = True
-        await query.edit_message_text("Please enter the card number(s), separated by commas:")
+        await query.edit_message_text("Please upload a .txt file containing the card numbers.")
     elif data.startswith('keygen_'):
         if str(user_id) == OWNER_ID:
             credits = int(data.split('_')[1])
@@ -419,7 +428,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if target_user_clean in (user.lower() for user in blacklist):
             await update.message.reply_text("❌ You can't report that username! That username is either the owner of the bot or blacklisted.")
         else:
-            context.user_data['saved_username'] = target_user
+            await save_username(user_id, target_user)
             await update.message.reply_text(f"✅ Username saved: {target_user}")
         context.user_data['awaiting_username'] = False
         await send_main_menu(update, context)
@@ -431,18 +440,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await send_main_menu(update, context)
     elif context.user_data.get('awaiting_bin_input'):
         await bin_lookup(update, context)
-    elif context.user_data.get('awaiting_anti_public_input'):
-        await anti_public_check(update, context)
     else:
         await update.message.reply_text("Sorry, I didn't understand that. Please choose an option from the keyboard.")
 
 # Bin Lookup API call
 async def bin_lookup(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    bin_numbers = update.message.text.strip().split(',')
+    bin_numbers = [bin.strip() for bin in update.message.text.strip().split(',')]
     try:
-        response = requests.post("https://bins.antipublic.cc/bins", json=bin_numbers).json()
         result_text = ""
-        for bin_info in response:
+        for bin_number in bin_numbers:
+            response = requests.get(f"https://bins.antipublic.cc/api/{bin_number}")
+            bin_info = response.json()
             for key, value in bin_info.items():
                 result_text += f"{key}: {value}\n"
             result_text += "\n"
@@ -454,19 +462,9 @@ async def bin_lookup(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Anti-Public API call
 async def anti_public_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    card_numbers = update.message.text.strip().split(',')
-    try:
-        response = requests.post("https://api.antipublic.cc/cards", json=card_numbers).json()
-        result_text = (f"Public CCs: {response['public']}\n"
-                       f"Private CCs: {response['private']}\n"
-                       f"{response['private_percentage']}% private")
-        await update.message.reply_text(result_text)
-    except Exception as e:
-        await update.message.reply_text(f"An error occurred: {e}")
-    context.user_data['awaiting_anti_public_input'] = False
-    await send_main_menu(update, context)
+    await update.message.reply_text("Please upload a .txt file containing the card numbers.")
+    context.user_data['awaiting_anti_public_file'] = True
 
-# Handle document uploads (proxies)
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if context.user_data.get('awaiting_proxies'):
         document = update.message.document
@@ -481,12 +479,34 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await send_main_menu(update, context)
         else:
             await update.message.reply_text("Please upload a valid .txt file containing proxies.")
+    elif context.user_data.get('awaiting_anti_public_file'):
+        document = update.message.document
+        if document.mime_type == 'text/plain' or document.file_name.endswith('.txt'):
+            file = await document.get_file()
+            file_content = await file.download_as_bytearray()
+            cards_text = file_content.decode('utf-8')
+            card_numbers = cards_text.splitlines()
+            await process_anti_public(update, context, card_numbers)
+            context.user_data['awaiting_anti_public_file'] = False
+        else:
+            await update.message.reply_text("Please upload a valid .txt file containing card numbers.")
     else:
         await update.message.reply_text("I wasn't expecting a document. Please choose an option from the keyboard.")
 
+async def process_anti_public(update: Update, context: ContextTypes.DEFAULT_TYPE, card_numbers):
+    try:
+        response = requests.post("https://api.antipublic.cc/cards", json=card_numbers).json()
+        result_text = (f"Public CCs: {response['public']}\n"
+                       f"Private CCs: {response['private']}\n"
+                       f"{response['private_percentage']}% private")
+        await update.message.reply_text(result_text)
+    except Exception as e:
+        await update.message.reply_text(f"An error occurred: {e}")
+    await send_main_menu(update, context)
+
 # Start mass report with specified count
 async def start_mass_report(update: Update, context: ContextTypes.DEFAULT_TYPE, count: int) -> None:
-    target_user = context.user_data.get('saved_username')
+    target_user = await get_saved_username(update.effective_user.id)
     user_id = update.effective_user.id
     if not target_user:
         await context.bot.send_message(chat_id=update.effective_chat.id, text="No username saved. Please use 'Save Username' to set a username first.")
@@ -515,6 +535,12 @@ async def start_mass_report(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         cursor = conn.cursor()
         cursor.execute("UPDATE users SET credits = credits - %s WHERE user_id = %s", (credits_needed, user_id))
         conn.commit()
+        # Check for downgrade
+        cursor.execute("SELECT credits FROM users WHERE user_id = %s", (user_id,))
+        credits = cursor.fetchone()[0]
+        if credits <= 0:
+            cursor.execute("UPDATE users SET account_type = 'FREE' WHERE user_id = %s", (user_id,))
+            conn.commit()
         close_db(conn)
 
     # Send an initial message to be updated with progress
@@ -549,6 +575,25 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) == OWNER_ID:
         help_text += "/keygen <amount> - Generate a key with specified credits\n"
     await update.message.reply_text(help_text)
+
+# Database functions for saved username
+async def save_username(user_id, username):
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET saved_username = %s WHERE user_id = %s", (username, user_id))
+    conn.commit()
+    close_db(conn)
+
+async def get_saved_username(user_id):
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT saved_username FROM users WHERE user_id = %s", (user_id,))
+    result = cursor.fetchone()
+    close_db(conn)
+    if result:
+        return result[0]
+    else:
+        return None
 
 # Command handlers and bot start
 def main():

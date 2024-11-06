@@ -18,6 +18,7 @@ keep_alive()
 TOKEN = os.environ.get('TOKEN')  # Ensure to set your TOKEN in the environment variables
 OWNER_ID = os.environ.get('OWNER_ID')  # Set OWNER_ID in environment variables
 OWNER_USERNAME = 'gdbs2'  # Owner's Telegram username
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://mrb-aeaw.onrender.com")  # Replace with your actual Render URL if needed
 application = Application.builder().token(TOKEN).build()
 
 # Set up logging for debugging

@@ -17,7 +17,7 @@ keep_alive()
 # Initialize the bot application
 TOKEN = os.environ.get('TOKEN')  # Ensure to set your TOKEN in the environment variables
 OWNER_ID = os.environ.get('OWNER_ID')  # Set OWNER_ID in environment variables
-OWNER_USERNAME = '@gdbs2'  # Owner's Telegram username
+OWNER_USERNAME = 'gdbs2'  # Owner's Telegram username
 application = Application.builder().token(TOKEN).build()
 
 # Set up logging for debugging
@@ -391,7 +391,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             success, response_message = send_report(target_user)
             if success:
                 blurred_email = blur_email(response_message)
-                await query.edit_message_text(f"✅ {blurred_email} : Reported @{target_user}!")
+                await query.edit_message_text(f"✅ {blurred_email} : Reported {target_user}!")
             else:
                 await query.edit_message_text(f"❌ Report failed: {response_message}")
             await send_main_menu(update, context)

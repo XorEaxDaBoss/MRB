@@ -182,7 +182,6 @@ def get_main_menu_keyboard(user_id):
         [KeyboardButton("🛠️ Tools"), KeyboardButton("ℹ️ User Info"), KeyboardButton("💰 Credits")]
     ]
     if str(user_id) == OWNER_ID:
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://mrb-aeaw.onrender.com')  # Replace with your actual Render URL
         keyboard.append([KeyboardButton("🔑 Keygen")])
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -238,7 +237,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("Choose an option:", reply_markup=reply_markup)
     elif text == "🔑 Keygen":
         if str(update.effective_user.id) == OWNER_ID:
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://mrb-aeaw.onrender.com')  # Replace with your actual Render URL
             keyboard = [
                 [
                     InlineKeyboardButton("100 Credits", callback_data='keygen_100'),
@@ -264,7 +262,6 @@ async def user_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_data:
         name, username, account_type, credits = user_data
         if str(user_id) == OWNER_ID:
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://mrb-aeaw.onrender.com')  # Replace with your actual Render URL
             account_type = 'OWNER'
             credits = 'Unlimited'
         await update.message.reply_text(
@@ -278,7 +275,6 @@ WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://mrb-aeaw.onrender.com')  # 
         )
     else:
         if str(user_id) == OWNER_ID:
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://mrb-aeaw.onrender.com')  # Replace with your actual Render URL
             account_type = 'OWNER'
             name = update.effective_user.full_name
             username = update.effective_user.username or "NoUsername"
@@ -296,11 +292,9 @@ WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://mrb-aeaw.onrender.com')  # 
             await update.message.reply_text("User not registered.")
 
 # Generate Key (restricted to OWNER_ID)
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://mrb-aeaw.onrender.com')  # Replace with your actual Render URL
 async def generate_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if str(user_id) != OWNER_ID:
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://mrb-aeaw.onrender.com')  # Replace with your actual Render URL
         await update.message.reply_text("Unauthorized access.")
         return
 
@@ -329,7 +323,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if target_user:
             # Apply cooldown only for free users
             if str(user_id) != OWNER_ID:
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://mrb-aeaw.onrender.com')  # Replace with your actual Render URL
                 conn = connect_db()
                 cursor = conn.cursor()
                 cursor.execute("SELECT account_type FROM users WHERE user_id = %s", (user_id,))
@@ -350,7 +343,6 @@ WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://mrb-aeaw.onrender.com')  # 
 
             # Check credits only for premium or owner users
             if account_type != 'FREE' and str(user_id) != OWNER_ID:
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://mrb-aeaw.onrender.com')  # Replace with your actual Render URL
                 credits = get_user_credits(user_id)
                 if credits is None or credits < 1:
                     keyboard = [
@@ -422,7 +414,6 @@ WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://mrb-aeaw.onrender.com')  # 
         await send_main_menu(update, context)
     elif data.startswith('keygen_'):
         if str(user_id) == OWNER_ID:
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://mrb-aeaw.onrender.com')  # Replace with your actual Render URL
             credits = int(data.split('_')[1])
             await generate_key_with_credits(update, context, credits)
             await send_main_menu(update, context)
@@ -599,7 +590,6 @@ async def start_mass_report(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
     # Check credits
     if str(user_id) != OWNER_ID:
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://mrb-aeaw.onrender.com')  # Replace with your actual Render URL
         credits = get_user_credits(user_id)
         if credits is None or credits < credits_needed:
             keyboard = [
@@ -654,7 +644,6 @@ WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://mrb-aeaw.onrender.com')  # 
 
     # Credit back for failed reports
     if failed_reports > 0 and str(user_id) != OWNER_ID:
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://mrb-aeaw.onrender.com')  # Replace with your actual Render URL
         conn = connect_db()
         cursor = conn.cursor()
         cursor.execute("UPDATE users SET credits = credits + %s WHERE user_id = %s", (failed_reports, user_id))
@@ -722,7 +711,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/user_info - Get your user information\n"
     )
     if str(update.effective_user.id) == OWNER_ID:
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://mrb-aeaw.onrender.com')  # Replace with your actual Render URL
         help_text += "/keygen <amount> - Generate a key with specified credits\n"
     await update.message.reply_text(help_text)
 

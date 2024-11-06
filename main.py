@@ -27,9 +27,7 @@ logger = logging.getLogger(__name__)
 fake = Faker()
 
 # Banner for console output
-banner = """
-Ohayo™
-"""
+banner = "Ohayo"
 
 print("\033[31m", banner, "\033[0m")
 
@@ -57,12 +55,11 @@ def send_report(target_user: str, proxy=None):
     generated_number = f"{country_code}{mobile_number}"
     user_agent = UserAgent().random
 
-    text = f"""Hello sir/ma'am,
-
-I would like to report a Telegram user who is engaging in suspicious and harmful activities. Their username is {target_user}. I believe they may be involved in scams and phishing attempts, which is causing harm to the community. I would appreciate it if you could look into this matter and take appropriate action.
-
-Thank you for your attention to this matter.
-    """
+    text = ("Hello sir/ma'am,\n\n"
+            f"I would like to report a Telegram user who is engaging in suspicious and harmful activities. Their username is {target_user}. "
+            "I believe they may be involved in scams and phishing attempts, which is causing harm to the community. "
+            "I would appreciate it if you could look into this matter and take appropriate action.\n\n"
+            "Thank you for your attention to this matter.")
 
     # Define cookies and headers
     cookies = {
@@ -122,7 +119,7 @@ def get_main_menu_keyboard():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     reply_markup = get_main_menu_keyboard()
     await update.message.reply_text(
-        "👋 Welcome to *Ohayo™ Auto Report Bot*! Choose an option:",
+        "👋 Welcome to *Ohayo Auto Report Bot*! Choose an option:",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -134,10 +131,8 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Show "Choose an action." with buttons "Single Report", "Mass Report"
         keyboard = [
             [
-                InlineKeyboardButton(
-                    "Single Report", callback_data='single_report'),
-                InlineKeyboardButton(
-                    "Mass Report", callback_data='mass_report')
+                InlineKeyboardButton("Single Report", callback_data='single_report'),
+                InlineKeyboardButton("Mass Report", callback_data='mass_report')
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -149,10 +144,8 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Show "Choose a tool." with buttons "Bin Lookup", "Anti-Public"
         keyboard = [
             [
-                InlineKeyboardButton(
-                    "Bin Lookup", callback_data='bin_lookup'),
-                InlineKeyboardButton(
-                    "Anti-Public", callback_data='anti_public')
+                InlineKeyboardButton("Bin Lookup", callback_data='bin_lookup'),
+                InlineKeyboardButton("Anti-Public", callback_data='anti_public')
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -228,7 +221,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Please enter the card number(s), separated by commas:")
     else:
         await query.edit_message_text("Unknown action.")
-
 # Bin Lookup API call
 async def bin_lookup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('awaiting_bin_input'):
@@ -427,7 +419,7 @@ async def start_mass_report(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         await asyncio.sleep(0.2)  # Add delay to avoid rate limiting
 
     # Finalize the message once all reports are completed
-    await progress_message.edit_text("✅ All reports were done successfully! Thank you for using Ohayo™ Auto Report Bot! 🧑‍💻")
+    await progress_message.edit_text("✅ All reports were done successfully! Thank you for using Ohayo Auto Report Bot! 🧑‍💻")
     await send_main_menu(update, context)
 
 # Command handlers

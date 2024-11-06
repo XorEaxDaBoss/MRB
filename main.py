@@ -240,7 +240,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 [
                     InlineKeyboardButton("100 Credits", callback_data='keygen_100'),
                     InlineKeyboardButton("200 Credits", callback_data='keygen_200'),
-                    InlineKeyboardButton("500 Credits", callback_data='keygen_500'),
                     InlineKeyboardButton("1000 Credits", callback_data='keygen_1000')
                 ]
             ]
@@ -502,7 +501,168 @@ async def bin_lookup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['awaiting_bin_input'] = False
     await send_main_menu(update, context)
 
-# The rest of the code remains the same...
+# Anti-Public API call
+async def anti_public_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Please upload a .txt file containing the card numbers.")
+    context.user_data['awaiting_anti_public_file'] = True
+
+# Handle document uploads (proxies or anti-public file)
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    document = update.message.document
+    if context.user_data.get('awaiting_proxies'):
+        if document.mime_type == 'text/plain' or document.file_name.endswith('.txt'):
+            file = await document.get_file()
+            file_content = await file.download_as_bytearray()
+            proxies_text = file_content.decode('utf-8')
+            proxies = proxies_text.splitlines()
+            context.user_data['proxies'] = [proxy.strip() for proxy in proxies if proxy.strip()]
+            await update.message.reply_text(f"✅ Proxies saved: {len(context.user_data['proxies'])} proxies added.")
+            context.user_data['awaiting_proxies'] = False
+            await send_main_menu(update, context)
+        else:
+            await update.message.reply_text("Please upload a valid .txt file containing proxies.")
+    elif context.user_data.get('awaiting_anti_public_file'):
+        if document.mime_type == 'text/plain' or document.file_name.endswith('.txt'):
+            file = await document.get_file()
+            file_content = await file.download_as_bytearray()
+            cards_text = file_content.decode('utf-8')
+            card_numbers = cards_text.splitlines()
+            await process_anti_public(update, context, card_numbers)
+            context.user_data['awaiting_anti_public_file'] = False
+        else:
+            await update.message.reply_text("Please upload a valid .txt file containing card numbers.")
+    else:
+        await update.message.reply_text("I wasn't expecting a document. Please choose an option from the keyboard.")
+
+# Process Anti-Public API with uploaded card numbers
+async def process_anti_public(update: Update, context: ContextTypes.DEFAULT_TYPE, card_numbers):
+    try:
+        response = requests.post("https://api.antipublic.cc/cards", json=card_numbers).json()
+        result_text = (f"Public CCs: {response['public']}\n"
+                       f"Private CCs: {response['private']}\n"
+                       f"{response['private_percentage']}% private")
+        await update.message.reply_text(result_text)
+    except Exception as e:
+        await update.message.reply_text(f"An error occurred: {e}")
+    await send_main_menu(update, context)
+
+# Start mass report with specified count
+async def start_mass_report(update: Update, context: ContextTypes.DEFAULT_TYPE, count: int) -> None:
+    target_user = await get_saved_username(update.effective_user.id)
+    user_id = update.effective_user.id
+    if not target_user:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="No username saved. Please use 'Save Username' to set a username first.")
+        return
+
+    # Credits required for mass reports
+    credits_required = {
+        10: 9,
+        20: 17,
+        50: 40,
+        100: 75
+    }
+    credits_needed = credits_required.get(count)
+    if credits_needed is None:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Invalid number of reports.")
+        return
+
+    # Check credits
+    if str(user_id) != OWNER_ID:
+        credits = get_user_credits(user_id)
+        if credits is None or credits < credits_needed:
+            keyboard = [
+                [
+                    InlineKeyboardButton("Add Credits", url=f"https://t.me/{OWNER_USERNAME}?start=Buy%20key.%20🗝")
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await context.bot.send_message(chat_id=update.effective_chat.id, text="Insufficient credits. Please redeem a key to get more credits.", reply_markup=reply_markup)
+            return
+        # Deduct credits
+        conn = connect_db()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET credits = credits - %s WHERE user_id = %s", (credits_needed, user_id))
+        conn.commit()
+        # Check for downgrade
+        cursor.execute("SELECT credits FROM users WHERE user_id = %s", (user_id,))
+        credits = cursor.fetchone()[0]
+        if credits <= 0:
+            cursor.execute("UPDATE users SET account_type = 'FREE' WHERE user_id = %s", (user_id,))
+            conn.commit()
+        close_db(conn)
+
+    # Send an initial message to be updated with progress
+    progress_message = await context.bot.send_message(chat_id=update.effective_chat.id, text=f"🚀 Starting mass report for @{target_user}...")
+
+    successful_reports = 0
+    failed_reports = 0
+
+    # Loop through the specified number of reports
+    for i in range(count):
+        if 'proxies' in context.user_data and context.user_data['proxies']:
+            proxies = context.user_data['proxies']
+            proxy = proxies[i % len(proxies)]  # Rotate proxies
+        else:
+            proxy = None
+
+        success, response_message = send_report(target_user, proxy=proxy)
+
+        if success:
+            successful_reports += 1
+            blurred_email = blur_email(response_message)
+            status_message = f"✅ {blurred_email} : Reported @{target_user}!"
+        else:
+            failed_reports += 1
+            status_message = f"❌ Report failed: {response_message}"
+
+        # Update the progress in the same message bubble
+        progress_bar = '█' * ((i+1)*10//count) + '░' * (10 - ((i+1)*10//count))
+        await progress_message.edit_text(f"Report {i+1}/{count}: {status_message}\nProgress: [{progress_bar}]")
+        await asyncio.sleep(0.2)  # Add delay to avoid rate limiting
+
+    # Credit back for failed reports
+    if failed_reports > 0 and str(user_id) != OWNER_ID:
+        conn = connect_db()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET credits = credits + %s WHERE user_id = %s", (failed_reports, user_id))
+        conn.commit()
+        close_db(conn)
+        final_message = f"✅ {successful_reports}/{count} reports were done successfully! We've credited back {failed_reports} credits to your balance for the failed reports."
+    else:
+        final_message = f"✅ All {count} reports were done successfully! Thank you for using Ohayo Auto Report Bot!"
+
+    await progress_message.edit_text(final_message)
+    await send_main_menu(update, context)
+
+def blur_email(email):
+    try:
+        local_part, domain = email.split('@')
+        if len(local_part) <= 2:
+            blurred_local = local_part[0] + '*' * (len(local_part) - 1)
+        else:
+            blurred_local = local_part[:2] + '***' + local_part[-1]
+        return f"{blurred_local}@{domain}"
+    except ValueError:
+        return "Invalid email format"
+
+# Database functions for saved username
+async def save_username(user_id, username):
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET saved_username = %s WHERE user_id = %s", (username, user_id))
+    conn.commit()
+    close_db(conn)
+
+async def get_saved_username(user_id):
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT saved_username FROM users WHERE user_id = %s", (user_id,))
+    result = cursor.fetchone()
+    close_db(conn)
+    if result:
+        return result[0]
+    else:
+        return None
 
 # Command handlers and bot start
 def main():
@@ -534,4 +694,4 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(help_text)
 
 if __name__ == '__main__':
-    main()
+    main() 

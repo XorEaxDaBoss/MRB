@@ -50,7 +50,6 @@ def close_db(connection):
 # Helper functions
 def is_user_registered(user_id):
     if str(user_id) == OWNER_ID:
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'https://mrb-aeaw.onrender.com')  # Replace with your actual Render URL
         return True
     conn = connect_db()
     cursor = conn.cursor()

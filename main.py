@@ -544,12 +544,27 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def process_anti_public(update: Update, context: ContextTypes.DEFAULT_TYPE, card_numbers):
     try:
         response = requests.post("https://api.antipublic.cc/cards", json=card_numbers).json()
-        result_text = (f"Public CCs: {response['public']}\n"
-                       f"Private CCs: {response['private']}\n"
-                       f"{response['private_percentage']}% private")
+        
+        # Check if the required keys are in the response
+        if all(key in response for key in ['public', 'private', 'private_percentage']):
+            result_text = (
+                f"Public CCs: {response['public']}\n"
+                f"Private CCs: {response['private']}\n"
+                f"{response['private_percentage']}% Private"
+            )
+        else:
+            # Handle cases where the expected data is not present
+            result_text = "Unexpected response format from Anti-Public API. Please try again later."
+
         await update.message.reply_text(result_text)
+        
+    except requests.exceptions.RequestException as e:
+        # Handle network or request errors
+        await update.message.reply_text(f"An error occurred while contacting the Anti-Public API: {e}")
     except Exception as e:
-        await update.message.reply_text(f"An error occurred: {e}")
+        # Handle other unforeseen errors
+        await update.message.reply_text(f"An unexpected error occurred: {e}")
+
     await send_main_menu(update, context)
 
 # Start mass report with specified count

@@ -310,7 +310,116 @@ async def generate_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
     close_db(conn)
     await update.message.reply_text(f"Generated key: `{key_id}` with {credits} credits", parse_mode='Markdown')
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
 
+    user_id = update.effective_user.id
+
+    if data == 'single_report':
+        target_user = await get_saved_username(user_id)
+        if target_user:
+            # Apply cooldown only for free users
+            if str(user_id) != OWNER_ID:
+                conn = connect_db()
+                cursor = conn.cursor()
+                cursor.execute("SELECT account_type FROM users WHERE user_id = %s", (user_id,))
+                account_type = cursor.fetchone()[0]
+                close_db(conn)
+
+                if account_type == 'FREE':
+                    last_report_time = context.user_data.get('last_report_time')
+                    current_time = time.time()
+                    if last_report_time:
+                        time_diff = current_time - last_report_time
+                        if time_diff < 15:
+                            time_left = int(15 - time_diff)
+                            await query.edit_message_text(f"Please wait {time_left} seconds before using Single Report again.")
+                            return
+                    # Update last report time
+                    context.user_data['last_report_time'] = current_time
+
+            # Check credits only for premium or owner users
+            if account_type != 'FREE' and str(user_id) != OWNER_ID:
+                credits = get_user_credits(user_id)
+                if credits is None or credits < 1:
+                    keyboard = [
+                        [
+                            InlineKeyboardButton("Add Credits", url=f"https://t.me/{OWNER_USERNAME}?start=Buy%20key.%20🗝")
+                        ]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    await query.edit_message_text("Insufficient credits. Please redeem a key to get more credits.", reply_markup=reply_markup)
+                    await send_main_menu(update, context)
+                    return
+                # Deduct 1 credit for non-free users
+                conn = connect_db()
+                cursor = conn.cursor()
+                cursor.execute("UPDATE users SET credits = credits - 1 WHERE user_id = %s", (user_id,))
+                conn.commit()
+                # Check for downgrade to free if credits reach zero
+                cursor.execute("SELECT credits FROM users WHERE user_id = %s", (user_id,))
+                credits = cursor.fetchone()[0]
+                if credits <= 0:
+                    cursor.execute("UPDATE users SET account_type = 'FREE' WHERE user_id = %s", (user_id,))
+                    conn.commit()
+                close_db(conn)
+
+            success, response_message = send_report(target_user)
+            if success:
+                blurred_email = blur_email(response_message)
+                await query.edit_message_text(f"✅ {blurred_email} : Reported @{target_user}!")
+            else:
+                await query.edit_message_text(f"❌ Report failed: {response_message}")
+            await send_main_menu(update, context)
+        else:
+            await query.edit_message_text("No username saved. Please use 'Save Username' to set a username first.")
+            await send_main_menu(update, context)
+
+    elif data == 'mass_report':
+        # Mass report logic remains the same, requiring credits
+        target_user = await get_saved_username(user_id)
+        if target_user:
+            keyboard = [
+                [
+                    InlineKeyboardButton("10 Reports - 9 Credits", callback_data='mass_10'),
+                    InlineKeyboardButton("20 Reports - 17 Credits", callback_data='mass_20')
+                ],
+                [
+                    InlineKeyboardButton("50 Reports - 40 Credits", callback_data='mass_50'),
+                    InlineKeyboardButton("100 Reports - 75 Credits", callback_data='mass_100')
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text("Choose the number of reports:", reply_markup=reply_markup)
+        else:
+            await query.edit_message_text("No username saved. Please use 'Save Username' to set a username first.")
+            await send_main_menu(update, context)
+
+    elif data.startswith('mass_'):
+        count = int(data.split('_')[1])
+        await start_mass_report(update, context, count)
+        await send_main_menu(update, context)
+    elif data == 'bin_lookup':
+        context.user_data['awaiting_bin_input'] = True
+        await query.edit_message_text("Please enter the BIN number(s), separated by commas:")
+    elif data == 'anti_public':
+        context.user_data['awaiting_anti_public_file'] = True
+        await query.edit_message_text("Please upload a .txt file containing the card numbers.")
+    elif data == 'my_balance':
+        credits = get_user_credits(user_id)
+        await query.edit_message_text(f"Your current balance is: {credits} credits.")
+        await send_main_menu(update, context)
+    elif data.startswith('keygen_'):
+        if str(user_id) == OWNER_ID:
+            credits = int(data.split('_')[1])
+            await generate_key_with_credits(update, context, credits)
+            await send_main_menu(update, context)
+        else:
+            await query.edit_message_text("Unauthorized access.")
+    else:
+        await query.edit_message_text("Unknown action.")
 # Redeem Key
 async def redeem_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -335,110 +444,7 @@ async def redeem_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(response)
 
 # Handle inline button callbacks
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
 
-    user_id = update.effective_user.id
-
-    if data == 'single_report':
-        target_user = await get_saved_username(user_id)
-        if target_user:
-            # Check if user is free and handle cooldown
-            if str(user_id) != OWNER_ID:
-                conn = connect_db()
-                cursor = conn.cursor()
-                cursor.execute("SELECT account_type FROM users WHERE user_id = %s", (user_id,))
-                account_type = cursor.fetchone()[0]
-                close_db(conn)
-                if account_type == 'FREE':
-                    last_report_time = context.user_data.get('last_report_time')
-                    current_time = time.time()
-                    if last_report_time:
-                        time_diff = current_time - last_report_time
-                        if time_diff < 15:
-                            time_left = int(15 - time_diff)
-                            await query.edit_message_text(f"Please wait {time_left} seconds before using Single Report again.")
-                            return
-                    context.user_data['last_report_time'] = current_time
-
-            # Check credits
-            if str(user_id) != OWNER_ID:
-                credits = get_user_credits(user_id)
-                if credits is None or credits < 1:
-                    keyboard = [
-                        [
-                            InlineKeyboardButton("Add Credits", url=f"https://t.me/{OWNER_USERNAME}?start=Buy%20key.%20🗝")
-                        ]
-                    ]
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                    await query.edit_message_text("Insufficient credits. Please redeem a key to get more credits.", reply_markup=reply_markup)
-                    await send_main_menu(update, context)
-                    return
-                # Deduct 1 credit
-                conn = connect_db()
-                cursor = conn.cursor()
-                cursor.execute("UPDATE users SET credits = credits - 1 WHERE user_id = %s", (user_id,))
-                conn.commit()
-                # Check for downgrade
-                cursor.execute("SELECT credits FROM users WHERE user_id = %s", (user_id,))
-                credits = cursor.fetchone()[0]
-                if credits <= 0:
-                    cursor.execute("UPDATE users SET account_type = 'FREE' WHERE user_id = %s", (user_id,))
-                    conn.commit()
-                close_db(conn)
-            success, response_message = send_report(target_user)
-            if success:
-                blurred_email = blur_email(response_message)
-                await query.edit_message_text(f"✅ {blurred_email} : Reported {target_user}!")
-            else:
-                await query.edit_message_text(f"❌ Report failed: {response_message}")
-            await send_main_menu(update, context)
-        else:
-            await query.edit_message_text("No username saved. Please use 'Save Username' to set a username first.")
-            await send_main_menu(update, context)
-    elif data == 'mass_report':
-        target_user = await get_saved_username(user_id)
-        if target_user:
-            keyboard = [
-                [
-                    InlineKeyboardButton("10 Reports - 9 Credits", callback_data='mass_10'),
-                    InlineKeyboardButton("20 Reports - 17 Credits", callback_data='mass_20')
-                ],
-                [
-                    InlineKeyboardButton("50 Reports - 40 Credits", callback_data='mass_50'),
-                    InlineKeyboardButton("100 Reports - 75 Credits", callback_data='mass_100')
-                ]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text("Choose the number of reports:", reply_markup=reply_markup)
-        else:
-            await query.edit_message_text("No username saved. Please use 'Save Username' to set a username first.")
-            await send_main_menu(update, context)
-    elif data.startswith('mass_'):
-        count = int(data.split('_')[1])
-        await start_mass_report(update, context, count)
-        await send_main_menu(update, context)
-    elif data == 'bin_lookup':
-        context.user_data['awaiting_bin_input'] = True
-        await query.edit_message_text("Please enter the BIN number(s), separated by commas:")
-    elif data == 'anti_public':
-        context.user_data['awaiting_anti_public_file'] = True
-        await query.edit_message_text("Please upload a .txt file containing the card numbers.")
-    elif data == 'my_balance':
-        credits = get_user_credits(user_id)
-        await query.edit_message_text(f"Your current balance is: {credits} credits.")
-        await send_main_menu(update, context)
-    elif data.startswith('keygen_'):
-        if str(user_id) == OWNER_ID:
-            credits = int(data.split('_')[1])
-            await generate_key_with_credits(update, context, credits)
-            await send_main_menu(update, context)
-        else:
-            await query.edit_message_text("Unauthorized access.")
-    else:
-        await query.edit_message_text("Unknown action.")
 
 async def generate_key_with_credits(update: Update, context: ContextTypes.DEFAULT_TYPE, credits: int):
     key_id = 'MRB-' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))

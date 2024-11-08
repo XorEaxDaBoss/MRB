@@ -146,6 +146,56 @@ async def register_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     close_db(conn)
 
+async def user_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT name, username, account_type, credits FROM users WHERE user_id = %s", (user_id,))
+    user_data = cursor.fetchone()
+    close_db(conn)
+    if user_data:
+        name, username, account_type, credits = user_data
+        if str(user_id) == OWNER_ID:
+            account_type = 'OWNER'
+            credits = 'Unlimited'
+        await update.message.reply_text(
+            f"ℹ️ *User Info*\n\n"
+            f"ID: {user_id}\n"
+            f"Name: {name}\n"
+            f"Username: @{username}\n"
+            f"Type: {account_type}\n"
+            f"Credits: {credits}",
+            parse_mode='Markdown'
+        )
+    else:
+        if str(user_id) == OWNER_ID:
+            account_type = 'OWNER'
+            name = update.effective_user.full_name
+            username = update.effective_user.username or "NoUsername"
+            credits = 'Unlimited'
+            await update.message.reply_text(
+                f"ℹ️ *User Info*\n\n"
+                f"ID: {user_id}\n"
+                f"Name: {name}\n"
+                f"Username: @{username}\n"
+                f"Type: {account_type}\n"
+                f"Credits: {credits}",
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text("User not registered.")
+    
+def blur_email(email):
+    try:
+        local_part, domain = email.split('@')
+        if len(local_part) <= 2:
+            blurred_local = local_part[0] + '*' * (len(local_part) - 1)
+        else:
+            blurred_local = local_part[:2] + '***' + local_part[-1]
+        return f"{blurred_local}@{domain}"
+    except ValueError:
+        return "Invalid email format"
+
 def send_report(target_user: str, proxy=None):
     username = fake.user_name()
     domain = fake.free_email_domain()
@@ -284,6 +334,15 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     else:
         await handle_text(update, context)
+
+async def generate_key_with_credits(update: Update, context: ContextTypes.DEFAULT_TYPE, credits: int):
+    key_id = 'MRB-' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO user_keys (key_id, credits) VALUES (%s, %s)", (key_id, credits))
+    conn.commit()
+    close_db(conn)
+    await update.callback_query.edit_message_text(f"Generated key: `{key_id}` with {credits} credits", parse_mode='Markdown')
 
 # Generate Key (restricted to OWNER_ID)
 async def generate_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -464,6 +523,17 @@ async def manage_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Button callback handler
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Inside button_callback function
+last_report_time = context.user_data.get('last_report_time')
+current_time = time.time()
+if last_report_time:
+    time_diff = current_time - last_report_time
+    if time_diff < 15:
+        time_left = int(15 - time_diff)
+        await query.edit_message_text(f"Please wait {time_left} seconds before using Single Report again.")
+        return
+# Update last report time
+context.user_data['last_report_time'] = current_time
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -884,3 +954,4 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == '__main__':
     main()
+

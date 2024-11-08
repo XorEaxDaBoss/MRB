@@ -285,6 +285,27 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     else:
         await handle_text(update, context)
 
+# Generate Key (restricted to OWNER_ID)
+async def generate_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if str(user_id) != OWNER_ID:
+        await update.message.reply_text("Unauthorized access.")
+        return
+
+    try:
+        credits = int(context.args[0])  # /keygen [amount]
+    except (IndexError, ValueError):
+        await update.message.reply_text("Please provide a valid credit amount. Usage: /keygen [amount]")
+        return
+
+    key_id = 'MRB-' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO user_keys (key_id, credits) VALUES (%s, %s)", (key_id, credits))
+    conn.commit()
+    close_db(conn)
+    await update.message.reply_text(f"Generated key: `{key_id}` with {credits} credits", parse_mode='Markdown')
+
 # Owner Panel Functions
 async def show_owner_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [

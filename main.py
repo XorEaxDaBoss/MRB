@@ -523,21 +523,22 @@ async def manage_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Button callback handler
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Inside button_callback function
-last_report_time = context.user_data.get('last_report_time')
-current_time = time.time()
-if last_report_time:
-    time_diff = current_time - last_report_time
-    if time_diff < 15:
-        time_left = int(15 - time_diff)
-        await query.edit_message_text(f"Please wait {time_left} seconds before using Single Report again.")
-        return
-# Update last report time
-context.user_data['last_report_time'] = current_time
     query = update.callback_query
     await query.answer()
     data = query.data
     user_id = update.effective_user.id
+
+    # Cooldown check for single report
+    last_report_time = context.user_data.get('last_report_time')
+    current_time = time.time()
+    if last_report_time:
+        time_diff = current_time - last_report_time
+        if time_diff < 15:
+            time_left = int(15 - time_diff)
+            await query.edit_message_text(f"Please wait {time_left} seconds before using Single Report again.")
+            return
+    # Update last report time for single report
+    context.user_data['last_report_time'] = current_time
 
     if data == 'single_report':
         target_user = await get_saved_username(user_id)
@@ -550,7 +551,7 @@ context.user_data['last_report_time'] = current_time
                 close_db(conn)
 
                 if account_type == 'FREE':
-                    # Check cooldown
+                    # Check if cooldown is still active
                     if check_cooldown(user_id):
                         remaining_time = 15 - (datetime.now() - last_report_time).seconds
                         await query.edit_message_text(f"Please wait {remaining_time} seconds before reporting again.")
@@ -562,21 +563,20 @@ context.user_data['last_report_time'] = current_time
                     credits = get_user_credits(user_id)
                     if credits < 1:
                         keyboard = [[
-                            InlineKeyboardButton("Add Credits", 
-                                url=f"https://t.me/{OWNER_USERNAME}?start=Buy%20key.%20🗝")
+                            InlineKeyboardButton("Add Credits", url=f"https://t.me/{OWNER_USERNAME}?start=Buy%20key.%20🗝")
                         ]]
                         reply_markup = InlineKeyboardMarkup(keyboard)
                         await query.edit_message_text(
-                            "Insufficient credits. Please redeem a key to get more credits.", 
+                            "Insufficient credits. Please redeem a key to get more credits.",
                             reply_markup=reply_markup
                         )
                         return
-                    
+
                     # Deduct credit for premium user
                     conn = connect_db()
                     cursor = conn.cursor()
                     cursor.execute(
-                        "UPDATE users SET credits = credits - 1 WHERE user_id = %s", 
+                        "UPDATE users SET credits = credits - 1 WHERE user_id = %s",
                         (user_id,)
                     )
                     conn.commit()
@@ -614,12 +614,12 @@ context.user_data['last_report_time'] = current_time
     elif data.startswith('mass_'):
         count = int(data.split('_')[1])
         await start_mass_report(update, context, count)
-    
+
     elif data.startswith('owner_'):
         if str(user_id) != OWNER_ID:
             await query.edit_message_text("Unauthorized access.")
             return
-        
+
         if data == 'owner_stats':
             await show_statistics(update, context)
         elif data == 'owner_broadcast':

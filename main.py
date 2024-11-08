@@ -305,6 +305,29 @@ async def generate_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
     close_db(conn)
     await update.message.reply_text(f"Generated key: `{key_id}` with {credits} credits", parse_mode='Markdown')
+    
+# Redeem Key
+async def redeem_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        key_id = context.args[0]  # Assumes /redeem <key_id>
+    except IndexError:
+        await update.message.reply_text("Please enter a valid key. Usage: /redeem <key>")
+        return
+
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT credits, is_redeemed FROM user_keys WHERE key_id = %s", (key_id,))
+    result = cursor.fetchone()
+    if result and not result[1]:  # Check if key exists and is not redeemed
+        credits = result[0]
+        cursor.execute("UPDATE user_keys SET is_redeemed = TRUE, redeemed_by = %s, redeemed_at = NOW() WHERE key_id = %s", (update.effective_user.id, key_id))
+        cursor.execute("UPDATE users SET credits = credits + %s, account_type = 'PREMIUM' WHERE user_id = %s", (credits, update.effective_user.id))
+        conn.commit()
+        response = f"Key redeemed successfully! {credits} credits added. Your account has been upgraded to PREMIUM."
+    else:
+        response = "Invalid or already redeemed key."
+    close_db(conn)
+    await update.message.reply_text(response)    
 
 # Owner Panel Functions
 async def show_owner_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):

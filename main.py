@@ -259,7 +259,7 @@ async def bin_lookup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"An error occurred: {e}")
     context.user_data['awaiting_bin_input'] = False
-    await send_main_menu(update, context)e
+    await send_main_menu(update, context)
 
 def send_report(target_user: str, proxy=None):
     username = fake.user_name()

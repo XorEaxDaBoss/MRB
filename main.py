@@ -205,11 +205,19 @@ def send_report(target_user: str, proxy=None):
     generated_number = f"{country_code}{mobile_number}"
     user_agent = UserAgent().random
 
-    text = ("Hello sir/ma'am,\n\n"
-            f"I would like to report a Telegram user who is engaging in suspicious and harmful activities. Their username is {target_user}. "
-            "I believe they may be involved in scams and phishing attempts, which is causing harm to the community. "
-            "I would appreciate it if you could look into this matter and take appropriate action.\n\n"
-            "Thank you for your attention to this matter.")
+    report_messages = [
+        (f"Hello,\n\nI would like to report a Telegram user who is engaging in suspicious and harmful activities. "
+         f"Their username is {target_user}. I believe they may be involved in scams and phishing attempts, "
+         f"which is causing harm to the community. Please investigate this matter and take appropriate action.\n\n"
+         f"Thank you for your attention to this issue."),
+        (f"Dear Telegram Team,\n\nI am writing to report a user with the username {target_user} for suspicious behavior. "
+         f"I suspect they are involved in fraudulent activities and scams that are detrimental to the Telegram community. "
+         f"I kindly request that you look into this user's activities and take necessary measures to ensure the safety of other users.\n\n"
+         f"Thank you for your prompt attention to this matter."),
+        # Add more variations of the report message
+    ]
+    
+    text = random.choice(report_messages)
 
     cookies = {
         'stel_ln': 'en',
@@ -637,6 +645,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     else:
         await query.edit_message_text("Unknown action.")
+        
+    elif data == 'back':
+    await back_button_callback(update, context)
+
 # Mass report function
 async def start_mass_report(update: Update, context: ContextTypes.DEFAULT_TYPE, count: int) -> None:
     target_user = await get_saved_username(update.effective_user.id)
@@ -855,6 +867,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await bin_lookup(update, context)
     elif context.user_data.get('awaiting_broadcast') and str(user_id) == OWNER_ID:
         await handle_broadcast_message(update, context)
+    elif context.user_data.get('awaiting_ban') and str(user_id) == OWNER_ID:
+    try:
+        user_id_to_ban, ban_duration = text.split()
+        ban_duration = int(ban_duration)
+        await ban_user(update, context, user_id_to_ban, ban_duration)
+    except ValueError:
+        await update.message.reply_text("Invalid input format. Please provide user ID and ban duration separated by a space.")
+    context.user_data['awaiting_ban'] = False
+elif context.user_data.get('awaiting_adjust_credits') and str(user_id) == OWNER_ID:
+    try:
+        user_id_to_adjust, credit_amount = text.split()
+        credit_amount = int(credit_amount)
+        await adjust_user_credits(update, context, user_id_to_adjust, credit_amount)
+    except ValueError:
+        await update.message.reply_text("Invalid input format. Please provide user ID and credit amount separated by a space.")
+    context.user_data['awaiting_adjust_credits'] = False
+    elif context.user_data.get('awaiting_revoke_key') and str(user_id) == OWNER_ID:
+    key_id = text.strip()
+    await revoke_key(update, context, key_id)
+    context.user_data['awaiting_revoke_key'] = False
     else:
         await update.message.reply_text("Please choose an option from the keyboard.")
 
@@ -887,28 +919,67 @@ def blur_email(email):
 
 async def handle_command_suggestions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    commands = [
-        ("report", "Send a report"),
-        ("reg", "Register to use the bot"),
-        ("redeem", "Redeem a key"),
-        ("help", "Show available commands"),
-        ("user_info", "View your user information")
-    ]
+    command = update.message.text.strip().lower()
     
-    if str(user_id) == OWNER_ID:
-        owner_commands = [
-            ("keygen", "Generate keys"),
-            ("broadcast", "Send message to all users"),
-            ("stats", "View bot statistics"),
-            ("ban", "Ban a user"),
-            ("unban", "Unban a user"),
-            ("addcredits", "Add credits to a user"),
-            ("removecredits", "Remove credits from a user")
-        ]
-        commands.extend(owner_commands)
+    if command == "/report":
+        await send_main_menu(update, context)
+    elif command == "/reg":
+        await register_user(update, context)
+    elif command == "/redeem":
+        await redeem_key(update, context)
+    elif command == "/help":
+        await help_command(update, context)
+    elif command == "/user_info":
+        await user_info(update, context)
+    elif str(user_id) == OWNER_ID:
+        if command == "/keygen":
+            await generate_key(update, context)
+        elif command == "/broadcast":
+            await broadcast_message(update, context)
+        elif command == "/stats":
+            await show_statistics(update, context)
+        elif command == "/ban":
+            context.user_data['awaiting_ban'] = True
+            await update.message.reply_text("Enter the user ID and duration (in days) to ban the user:")
+        elif command == "/unban":
+            await update.message.reply_text("Enter the user ID to unban:")
+            context.user_data['awaiting_unban'] = True
+        elif command == "/addcredits":
+            await update.message.reply_text("Enter the user ID and amount to add credits:")
+            context.user_data['awaiting_add_credits'] = True
+        elif command == "/removecredits":
+            await update.message.reply_text("Enter the user ID and amount to remove credits:")
+            context.user_data['awaiting_remove_credits'] = True
+    else:
+        await update.message.reply_text("Invalid command. Please choose a valid command from /help.")
+
+async def back_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_main_menu(update, context)
+
+async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id_to_ban: str, ban_duration: int):
+    conn = connect_db()
+    cursor = conn.cursor()
+    ban_until = datetime.now() + timedelta(days=ban_duration)
+    cursor.execute("UPDATE users SET ban_until = %s WHERE user_id = %s", (ban_until, user_id_to_ban))
+    conn.commit()
+    close_db(conn)
+    await update.message.reply_text(f"User {user_id_to_ban} has been banned for {ban_duration} days.")
     
-    command_text = "Available commands:\n" + "\n".join([f"/{cmd} - {desc}" for cmd, desc in commands])
-    await update.message.reply_text(command_text)
+async def adjust_user_credits(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id_to_adjust: str, credit_amount: int):
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET credits = credits + %s WHERE user_id = %s", (credit_amount, user_id_to_adjust))
+    conn.commit()
+    close_db(conn)
+    await update.message.reply_text(f"Credits for user {user_id_to_adjust} have been adjusted by {credit_amount}.")
+    
+async def revoke_key(update: Update, context: ContextTypes.DEFAULT_TYPE, key_id: str):
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE user_keys SET is_redeemed = TRUE WHERE key_id = %s", (key_id,))
+    conn.commit()
+    close_db(conn)
+    await update.message.reply_text(f"Key {key_id} has been revoked.")
 
 # Main function
 def main():

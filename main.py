@@ -642,12 +642,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Back button handler
     elif data == 'owner_panel':
         await show_owner_panel(update, context)
+        
+    elif data == 'back':
+        await back_button_callback(update, context)
     
     else:
         await query.edit_message_text("Unknown action.")
-        
-    elif data == 'back':
-    await back_button_callback(update, context)
 
 # Mass report function
 async def start_mass_report(update: Update, context: ContextTypes.DEFAULT_TYPE, count: int) -> None:

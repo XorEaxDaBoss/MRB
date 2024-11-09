@@ -868,25 +868,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     elif context.user_data.get('awaiting_broadcast') and str(user_id) == OWNER_ID:
         await handle_broadcast_message(update, context)
     elif context.user_data.get('awaiting_ban') and str(user_id) == OWNER_ID:
-    try:
-        user_id_to_ban, ban_duration = text.split()
-        ban_duration = int(ban_duration)
-        await ban_user(update, context, user_id_to_ban, ban_duration)
-    except ValueError:
-        await update.message.reply_text("Invalid input format. Please provide user ID and ban duration separated by a space.")
-    context.user_data['awaiting_ban'] = False
-elif context.user_data.get('awaiting_adjust_credits') and str(user_id) == OWNER_ID:
-    try:
-        user_id_to_adjust, credit_amount = text.split()
-        credit_amount = int(credit_amount)
-        await adjust_user_credits(update, context, user_id_to_adjust, credit_amount)
-    except ValueError:
-        await update.message.reply_text("Invalid input format. Please provide user ID and credit amount separated by a space.")
-    context.user_data['awaiting_adjust_credits'] = False
+        try:
+            user_id_to_ban, ban_duration = text.split()
+            ban_duration = int(ban_duration)
+            await ban_user(update, context, user_id_to_ban, ban_duration)
+        except ValueError:
+            await update.message.reply_text("Invalid input format. Please provide user ID and ban duration separated by a space.")
+        context.user_data['awaiting_ban'] = False
+    elif context.user_data.get('awaiting_adjust_credits') and str(user_id) == OWNER_ID:
+        try:
+            user_id_to_adjust, credit_amount = text.split()
+            credit_amount = int(credit_amount)
+            await adjust_user_credits(update, context, user_id_to_adjust, credit_amount)
+        except ValueError:
+            await update.message.reply_text("Invalid input format. Please provide user ID and credit amount separated by a space.")
+        context.user_data['awaiting_adjust_credits'] = False
     elif context.user_data.get('awaiting_revoke_key') and str(user_id) == OWNER_ID:
-    key_id = text.strip()
-    await revoke_key(update, context, key_id)
-    context.user_data['awaiting_revoke_key'] = False
+        key_id = text.strip()
+        await revoke_key(update, context, key_id)
+        context.user_data['awaiting_revoke_key'] = False
     else:
         await update.message.reply_text("Please choose an option from the keyboard.")
 

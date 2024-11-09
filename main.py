@@ -107,6 +107,25 @@ def check_cooldown(user_id):
         return datetime.now() - last_time < cooldown
     return False
 
+def is_user_banned(user_id):
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT ban_until FROM users WHERE user_id = %s", (user_id,))
+    result = cursor.fetchone()
+    close_db(conn)
+    
+    if result and result[0]:
+        return result[0] > datetime.now()
+    return False
+
+def get_ban_info(user_id):
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT ban_until FROM users WHERE user_id = %s", (user_id,))
+    result = cursor.fetchone()
+    close_db(conn)
+    return result[0] if result else None
+
 def get_main_menu_keyboard(user_id):
     keyboard = [
         [KeyboardButton("📢 Report"), KeyboardButton("💾 Save Username"), KeyboardButton("🔌 Proxies")],
@@ -274,8 +293,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # Handle button presses
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_user_registered(update.effective_user.id):
+    user_id = update.effective_user.id
+    
+    if not is_user_registered(user_id):
         await update.message.reply_text("Please register first using /reg command.")
+        return
+        
+    if is_user_banned(user_id):
+        ban_info = get_ban_info(user_id)
+        days_left = (ban_info - datetime.now()).days + 1
+        await update.message.reply_text(f"❌ Your account is banned. Ban expires in {days_left} days.")
         return
 
     text = update.message.text
@@ -530,18 +557,35 @@ async def manage_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.edit_message_text(keys_text, reply_markup=reply_markup, parse_mode='Markdown')
 
 # Button callback handler
-# Button callback handler
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
     user_id = update.effective_user.id
 
+    # Check if user is banned
+    if is_user_banned(user_id):
+        ban_info = get_ban_info(user_id)
+        days_left = (ban_info - datetime.now()).days + 1
+        await query.edit_message_text(f"❌ Your account is banned. Ban expires in {days_left} days.")
+        return
+
     # Handle Credits Button
     if data == 'my_balance':
         credits = get_user_credits(user_id)
         await query.edit_message_text(f"Your current balance is: {credits} credits.")
         await send_main_menu(update, context)
+
+    # Handle Tool Buttons
+    elif data == 'bin_lookup':
+        context.user_data['awaiting_bin_input'] = True
+        await query.edit_message_text("Please enter the BIN number(s), separated by commas:")
+        return
+
+    elif data == 'anti_public':
+        context.user_data['awaiting_anti_public_file'] = True
+        await query.edit_message_text("Please upload a .txt file containing the card numbers.")
+        return
 
     # Single Report with cooldown check for free users
     elif data == 'single_report':
@@ -554,13 +598,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             close_db(conn)
 
             if account_type == 'FREE' and str(user_id) != OWNER_ID:
-                last_report_time = context.user_data.get('last_report_time')
-                current_time = time.time()
-                if last_report_time and (current_time - last_report_time < 15):
-                    time_left = int(15 - (current_time - last_report_time))
-                    await query.edit_message_text(f"Please wait {time_left} seconds before using Single Report again.")
+                if check_cooldown(user_id):
+                    remaining_time = 15 - (datetime.now() - last_report_time).seconds
+                    await query.edit_message_text(f"Please wait {remaining_time} seconds before using Single Report again.")
                     return
-                context.user_data['last_report_time'] = current_time
+                update_user_report_time(user_id)
 
             if account_type != 'FREE' and str(user_id) != OWNER_ID:
                 credits = get_user_credits(user_id)
@@ -597,14 +639,18 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("10 Reports - 9 Credits", callback_data='mass_10'),
                  InlineKeyboardButton("20 Reports - 17 Credits", callback_data='mass_20')],
                 [InlineKeyboardButton("50 Reports - 40 Credits", callback_data='mass_50'),
-                 InlineKeyboardButton("100 Reports - 75 Credits", callback_data='mass_100')],
-                [InlineKeyboardButton("« Back", callback_data='owner_panel')]
+                 InlineKeyboardButton("100 Reports - 75 Credits", callback_data='mass_100')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text("Choose the number of reports:", reply_markup=reply_markup)
         else:
-            await query.edit_message_text("No username saved. Please use 'Save Username' to set a username first.")
+            await query.edit_message_text("No username saved. Please use 'Save Username' first.")
             await send_main_menu(update, context)
+
+    elif data.startswith('mass_'):
+        count = int(data.split('_')[1])
+        await start_mass_report(update, context, count)
+        await send_main_menu(update, context)
 
     # Owner Panel Actions
     elif data.startswith('owner_'):
@@ -623,31 +669,50 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # User Management actions
     elif data == 'ban_user':
-        await query.edit_message_text("Enter the user ID and duration (in days) to ban the user:")
+        if str(user_id) != OWNER_ID:
+            await query.edit_message_text("Unauthorized access.")
+            return
+        await query.edit_message_text("Enter the user ID and duration (in days) to ban the user (e.g., '123456789 7' for 7 days):")
         context.user_data['awaiting_ban'] = True
 
     elif data == 'adjust_credits':
-        await query.edit_message_text("Enter the user ID and amount to adjust credits:")
+        if str(user_id) != OWNER_ID:
+            await query.edit_message_text("Unauthorized access.")
+            return
+        await query.edit_message_text("Enter the user ID and amount to adjust credits (e.g., '123456789 100' to add 100 credits):")
         context.user_data['awaiting_adjust_credits'] = True
 
     # Key Management actions
+    elif data.startswith('keygen_'):
+        if str(user_id) == OWNER_ID:
+            credits = int(data.split('_')[1])
+            await generate_key_with_credits(update, context, credits)
+            await send_main_menu(update, context)
+        else:
+            await query.edit_message_text("Unauthorized access.")
+
     elif data == 'generate_key':
-        await generate_key_with_credits(update, context, credits=100)  # Example fixed credits
-        await send_main_menu(update, context)
+        if str(user_id) == OWNER_ID:
+            keyboard = [
+                [InlineKeyboardButton("100 Credits", callback_data='keygen_100'),
+                 InlineKeyboardButton("200 Credits", callback_data='keygen_200'),
+                 InlineKeyboardButton("1000 Credits", callback_data='keygen_1000')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text("Choose the amount of credits for the key:", reply_markup=reply_markup)
+        else:
+            await query.edit_message_text("Unauthorized access.")
 
     elif data == 'revoke_key':
-        await query.edit_message_text("Enter the key ID to revoke:")
-        context.user_data['awaiting_revoke_key'] = True
+        if str(user_id) == OWNER_ID:
+            await query.edit_message_text("Enter the key ID to revoke:")
+            context.user_data['awaiting_revoke_key'] = True
+        else:
+            await query.edit_message_text("Unauthorized access.")
 
     # Back button handler
-    elif data == 'owner_panel':
-        await show_owner_panel(update, context)
-        
     elif data == 'back':
-        await back_button_callback(update, context)
-    
-    else:
-        await query.edit_message_text("Unknown action.")
+        await show_owner_panel(update, context)
 
 # Mass report function
 async def start_mass_report(update: Update, context: ContextTypes.DEFAULT_TYPE, count: int) -> None:
@@ -962,8 +1027,40 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id_t
     ban_until = datetime.now() + timedelta(days=ban_duration)
     cursor.execute("UPDATE users SET ban_until = %s WHERE user_id = %s", (ban_until, user_id_to_ban))
     conn.commit()
+    
+    # Get user's Telegram ID for notification
+    cursor.execute("SELECT user_id FROM users WHERE user_id = %s", (user_id_to_ban,))
+    user_result = cursor.fetchone()
     close_db(conn)
-    await update.message.reply_text(f"User {user_id_to_ban} has been banned for {ban_duration} days.")
+
+    if user_result:
+        # Send notification to banned user
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_to_ban,
+                text=f"⚠️ Your account has been banned for {ban_duration} days.\n"
+                     f"Ban expires on: {ban_until.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                     f"You will not be able to use the bot's features until the ban expires."
+            )
+        except Exception as e:
+            logger.error(f"Failed to send ban notification: {e}")
+
+    await update.message.reply_text(f"✅ User {user_id_to_ban} has been banned for {ban_duration} days.")
+
+async def revoke_key(update: Update, context: ContextTypes.DEFAULT_TYPE, key_id: str):
+    conn = connect_db()
+    cursor = conn.cursor()
+    
+    # Delete the key instead of marking as redeemed
+    cursor.execute("DELETE FROM user_keys WHERE key_id = %s", (key_id,))
+    rows_affected = cursor.rowcount
+    conn.commit()
+    close_db(conn)
+    
+    if rows_affected > 0:
+        await update.message.reply_text(f"✅ Key {key_id} has been successfully revoked and removed from the database.")
+    else:
+        await update.message.reply_text(f"❌ Key {key_id} not found in the database.")
     
 async def adjust_user_credits(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id_to_adjust: str, credit_amount: int):
     conn = connect_db()

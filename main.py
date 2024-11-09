@@ -522,25 +522,29 @@ async def manage_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.edit_message_text(keys_text, reply_markup=reply_markup, parse_mode='Markdown')
 
 # Button callback handler
+# Button callback handler
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
     user_id = update.effective_user.id
 
+    # Handle Credits Button
+    if data == 'my_balance':
+        credits = get_user_credits(user_id)
+        await query.edit_message_text(f"Your current balance is: {credits} credits.")
+        await send_main_menu(update, context)
+
     # Single Report with cooldown check for free users
-    if data == 'single_report':
+    elif data == 'single_report':
         target_user = await get_saved_username(user_id)
-        
         if target_user:
-            # Check user account type
             conn = connect_db()
             cursor = conn.cursor()
             cursor.execute("SELECT account_type FROM users WHERE user_id = %s", (user_id,))
             account_type = cursor.fetchone()[0]
             close_db(conn)
 
-            # Apply cooldown only for free users
             if account_type == 'FREE' and str(user_id) != OWNER_ID:
                 last_report_time = context.user_data.get('last_report_time')
                 current_time = time.time()
@@ -548,9 +552,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     time_left = int(15 - (current_time - last_report_time))
                     await query.edit_message_text(f"Please wait {time_left} seconds before using Single Report again.")
                     return
-                context.user_data['last_report_time'] = current_time  # Update last report time
+                context.user_data['last_report_time'] = current_time
 
-            # Check credits for premium users and deduct 1 credit if applicable
             if account_type != 'FREE' and str(user_id) != OWNER_ID:
                 credits = get_user_credits(user_id)
                 if credits is None or credits < 1:
@@ -561,15 +564,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await query.edit_message_text("Insufficient credits. Please redeem a key to get more credits.", reply_markup=reply_markup)
                     await send_main_menu(update, context)
                     return
-                
-                # Deduct 1 credit for premium user
                 conn = connect_db()
                 cursor = conn.cursor()
                 cursor.execute("UPDATE users SET credits = credits - 1 WHERE user_id = %s", (user_id,))
                 conn.commit()
                 close_db(conn)
 
-            # Perform the report
             success, response_message = send_report(target_user)
             if success:
                 blurred_email = blur_email(response_message)
@@ -589,19 +589,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("10 Reports - 9 Credits", callback_data='mass_10'),
                  InlineKeyboardButton("20 Reports - 17 Credits", callback_data='mass_20')],
                 [InlineKeyboardButton("50 Reports - 40 Credits", callback_data='mass_50'),
-                 InlineKeyboardButton("100 Reports - 75 Credits", callback_data='mass_100')]
+                 InlineKeyboardButton("100 Reports - 75 Credits", callback_data='mass_100')],
+                [InlineKeyboardButton("« Back", callback_data='owner_panel')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text("Choose the number of reports:", reply_markup=reply_markup)
         else:
             await query.edit_message_text("No username saved. Please use 'Save Username' to set a username first.")
             await send_main_menu(update, context)
-
-    # Mass Report Execution
-    elif data.startswith('mass_'):
-        count = int(data.split('_')[1])
-        await start_mass_report(update, context, count)
-        await send_main_menu(update, context)
 
     # Owner Panel Actions
     elif data.startswith('owner_'):
@@ -618,16 +613,28 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif data == 'owner_keys':
             await manage_keys(update, context)
 
-    # Key Generation for Owner
-    elif data.startswith('keygen_'):
-        if str(user_id) == OWNER_ID:
-            credits = int(data.split('_')[1])
-            await generate_key_with_credits(update, context, credits)
-            await send_main_menu(update, context)
-        else:
-            await query.edit_message_text("Unauthorized access.")
+    # User Management actions
+    elif data == 'ban_user':
+        await query.edit_message_text("Enter the user ID and duration (in days) to ban the user:")
+        context.user_data['awaiting_ban'] = True
 
-    # Handle Unknown Actions
+    elif data == 'adjust_credits':
+        await query.edit_message_text("Enter the user ID and amount to adjust credits:")
+        context.user_data['awaiting_adjust_credits'] = True
+
+    # Key Management actions
+    elif data == 'generate_key':
+        await generate_key_with_credits(update, context, credits=100)  # Example fixed credits
+        await send_main_menu(update, context)
+
+    elif data == 'revoke_key':
+        await query.edit_message_text("Enter the key ID to revoke:")
+        context.user_data['awaiting_revoke_key'] = True
+
+    # Back button handler
+    elif data == 'owner_panel':
+        await show_owner_panel(update, context)
+    
     else:
         await query.edit_message_text("Unknown action.")
 # Mass report function
